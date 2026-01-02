@@ -22,14 +22,16 @@ export async function GET(request: NextRequest) {
         updated_at,
         business_id,
         creator_id,
+        reply,
+        reply_date,
         businesses (
           id,
           company_name
         ),
         creators (
           id,
-          display_name,
-          profile_image_url
+          name,
+          photo
         )
       `)
       .order('created_at', { ascending: false });
@@ -56,23 +58,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch reviews' }, { status: 500 });
     }
 
-    // Transformiši podatke
+    // Transformiši podatke u format koji frontend očekuje
     const formattedReviews = reviews?.map(review => ({
       id: review.id,
       rating: review.rating,
       comment: review.comment,
       status: review.status,
       createdAt: review.created_at,
+      date: review.created_at,
       updatedAt: review.updated_at,
+      businessId: review.business_id,
+      creatorId: review.creator_id,
+      businessName: review.businesses?.company_name || 'Anonimni biznis',
       business: {
         id: review.businesses?.id,
         name: review.businesses?.company_name,
       },
       creator: {
         id: review.creators?.id,
-        name: review.creators?.display_name,
-        profileImage: review.creators?.profile_image_url,
+        name: review.creators?.name,
+        photo: review.creators?.photo,
       },
+      reply: review.reply || null,
+      replyDate: review.reply_date || null,
     })) || [];
 
     return NextResponse.json({ reviews: formattedReviews });

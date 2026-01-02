@@ -5,11 +5,10 @@ import Link from 'next/link';
 import { categories, platforms, languages } from '@/lib/mockData';
 import CreatorCard from '@/components/CreatorCard';
 import { useDemo } from '@/context/DemoContext';
-import { generateReviewStats } from '@/types/review';
 import { createClient } from '@/lib/supabase/client';
 
 export default function KreatoriPage() {
-  const { currentUser, isLoggedIn, getCreators, getReviewsForCreator, getOwnCreatorStatus, updateCurrentUser } = useDemo();
+  const { currentUser, isLoggedIn, getOwnCreatorStatus, updateCurrentUser } = useDemo();
   
   // ALL HOOKS MUST BE AT THE TOP - before any conditional returns
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -22,12 +21,31 @@ export default function KreatoriPage() {
   const [showFilters, setShowFilters] = useState<boolean>(true);
   const [liveSubscriptionStatus, setLiveSubscriptionStatus] = useState<string | null>(null);
   const [isCheckingSubscription, setIsCheckingSubscription] = useState(true);
+  const [allCreators, setAllCreators] = useState<any[]>([]);
+  const [isLoadingCreators, setIsLoadingCreators] = useState(true);
   
   // Get creator status for pending check
   const creatorStatus = getOwnCreatorStatus();
   
-  // Get creators from context (filtered by status for non-admins)
-  const allCreators = getCreators(currentUser.type === 'admin');
+  // Fetch creators from Supabase
+  useEffect(() => {
+    const fetchCreators = async () => {
+      try {
+        const includeAll = currentUser.type === 'admin';
+        const response = await fetch(`/api/creators?includeAll=${includeAll}`);
+        if (response.ok) {
+          const data = await response.json();
+          setAllCreators(data.creators || []);
+        }
+      } catch (error) {
+        console.error('Error fetching creators:', error);
+      } finally {
+        setIsLoadingCreators(false);
+      }
+    };
+    
+    fetchCreators();
+  }, [currentUser.type]);
   
   // Fetch live subscription status from Supabase for business users
   useEffect(() => {
@@ -96,24 +114,23 @@ export default function KreatoriPage() {
     handleResize();
   }, []);
   
-  // Helper to get creator rating
+  // Helper to get creator rating - now uses data from API
   const getCreatorRating = (creatorId: string): number => {
-    const reviews = getReviewsForCreator(creatorId, true);
-    const stats = generateReviewStats(reviews);
-    return stats.averageRating;
+    const creator = allCreators.find(c => c.id === creatorId);
+    return creator?.rating || 0;
   };
   
   const getCreatorReviewCount = (creatorId: string): number => {
-    const reviews = getReviewsForCreator(creatorId, true);
-    return reviews.length;
+    const creator = allCreators.find(c => c.id === creatorId);
+    return creator?.totalReviews || 0;
   };
   
   // Filtered creators - must be declared as a hook before conditional returns
   const filteredCreators = useMemo(() => {
     let results = allCreators.filter((creator) => {
-      // For admins, show all (already filtered in getCreators)
-      // For others, only show approved (already handled in getCreators)
-      if (currentUser.type !== 'admin' && !creator.approved) return false;
+      // For admins, show all (already filtered in API)
+      // For others, only show approved (already handled in API)
+      if (currentUser.type !== 'admin' && creator.status !== 'approved') return false;
       
       if (selectedCategory && !creator.categories.includes(selectedCategory)) return false;
       if (selectedPlatform && !creator.platforms.includes(selectedPlatform)) return false;
@@ -490,7 +507,11 @@ export default function KreatoriPage() {
                   </svg>
                 </button>
                 <p className="text-muted text-sm sm:text-base">
-                  Prikazano <span className="font-medium text-foreground">{filteredCreators.length}</span> kreatora
+                  {isLoadingCreators ? (
+                    <span className="text-muted">Učitavanje...</span>
+                  ) : (
+                    <>Prikazano <span className="font-medium text-foreground">{filteredCreators.length}</span> kreatora</>
+                  )}
                 </p>
               </div>
               
@@ -509,7 +530,13 @@ export default function KreatoriPage() {
             </div>
 
             {/* Grid */}
-            {filteredCreators.length > 0 ? (
+            {isLoadingCreators ? (
+              <div className="text-center py-20">
+                <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <h3 className="text-lg font-medium mb-2">Učitavamo kreatore...</h3>
+                <p className="text-muted">Molimo sačekajte</p>
+              </div>
+            ) : filteredCreators.length > 0 ? (
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
                 {filteredCreators.map((creator) => (
                   <CreatorCard key={creator.id} creator={creator} />

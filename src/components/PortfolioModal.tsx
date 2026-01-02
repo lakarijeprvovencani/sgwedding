@@ -17,6 +17,7 @@ interface PortfolioModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAdd: (item: PortfolioItem) => void;
+  creatorId?: string; // For uploading to Supabase Storage
 }
 
 // Helper to extract video ID and create thumbnail from URLs
@@ -69,7 +70,7 @@ function parseMediaUrl(url: string): { type: PortfolioItem['type']; thumbnail: s
   }
 }
 
-export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModalProps) {
+export default function PortfolioModal({ isOpen, onClose, onAdd, creatorId }: PortfolioModalProps) {
   const [activeTab, setActiveTab] = useState<'url' | 'upload'>('url');
   const [url, setUrl] = useState('');
   const [urlError, setUrlError] = useState('');
@@ -80,6 +81,7 @@ export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModa
   const [urlDescription, setUrlDescription] = useState(''); // Description for URL links
   const [selectedPlatform, setSelectedPlatform] = useState<'instagram' | 'tiktok' | 'youtube' | 'other'>('instagram');
   const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -125,15 +127,22 @@ export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModa
 
   const processFile = (file: File) => {
     // Check file type
-    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/quicktime', 'video/webm'];
+    const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const videoTypes = ['video/mp4', 'video/quicktime', 'video/webm'];
+    const validTypes = [...imageTypes, ...videoTypes];
+    
     if (!validTypes.includes(file.type)) {
       setUrlError('Nepodržan format. Koristite JPG, PNG, GIF, WebP, MP4, MOV ili WebM.');
       return;
     }
 
-    // Check file size (max 50MB)
-    if (file.size > 50 * 1024 * 1024) {
-      setUrlError('Fajl je prevelik. Maksimalna veličina je 50MB.');
+    // Check file size - different limits for images vs videos
+    const isVideo = videoTypes.includes(file.type);
+    const maxSize = isVideo ? 30 * 1024 * 1024 : 10 * 1024 * 1024; // 30MB for video, 10MB for images
+    const maxSizeLabel = isVideo ? '30MB' : '10MB';
+    
+    if (file.size > maxSize) {
+      setUrlError(`Fajl je prevelik. Maksimalna veličina za ${isVideo ? 'video' : 'slike'} je ${maxSizeLabel}.`);
       return;
     }
 
@@ -176,7 +185,7 @@ export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModa
     processFile(file);
   };
 
-  const handleUploadSubmit = () => {
+  const handleUploadSubmit = async () => {
     if (!uploadedFile || !uploadPreview) {
       setUrlError('Izaberite fajl');
       return;
@@ -184,17 +193,58 @@ export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModa
 
     const isVideo = uploadedFile.type.startsWith('video/');
     
-    const newItem: PortfolioItem = {
-      id: `upload-${Date.now()}`,
-      type: 'upload',
-      url: uploadPreview, // In production, this would be the uploaded URL from cloud storage
-      thumbnail: isVideo ? uploadPreview : uploadPreview, // For video, use first frame or placeholder
-      description: description.trim() || undefined,
-      platform: selectedPlatform,
-    };
+    // If creatorId is provided, upload to Supabase Storage
+    if (creatorId) {
+      setIsUploading(true);
+      setUrlError('');
+      
+      try {
+        const formData = new FormData();
+        formData.append('file', uploadedFile);
+        formData.append('creatorId', creatorId);
+        
+        const response = await fetch('/api/upload/portfolio', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Upload failed');
+        }
+        
+        const newItem: PortfolioItem = {
+          id: `upload-${Date.now()}`,
+          type: 'upload',
+          url: data.url,
+          thumbnail: data.url, // For images, same URL. For video, could generate thumbnail
+          description: description.trim() || undefined,
+          platform: selectedPlatform,
+        };
+        
+        onAdd(newItem);
+        resetAndClose();
+      } catch (error: any) {
+        console.error('Upload error:', error);
+        setUrlError(error.message || 'Greška prilikom uploada');
+      } finally {
+        setIsUploading(false);
+      }
+    } else {
+      // Fallback for local preview (legacy behavior)
+      const newItem: PortfolioItem = {
+        id: `upload-${Date.now()}`,
+        type: 'upload',
+        url: uploadPreview,
+        thumbnail: uploadPreview,
+        description: description.trim() || undefined,
+        platform: selectedPlatform,
+      };
 
-    onAdd(newItem);
-    resetAndClose();
+      onAdd(newItem);
+      resetAndClose();
+    }
   };
 
   const resetAndClose = () => {
@@ -208,6 +258,7 @@ export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModa
     setSelectedPlatform('instagram');
     setActiveTab('url');
     setIsDragging(false);
+    setIsUploading(false);
     onClose();
   };
 
@@ -391,7 +442,7 @@ export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModa
                       Slike (JPG, PNG, GIF, WebP) ili Video (MP4, MOV, WebM)
                     </p>
                     <p className="text-xs text-muted mt-2">
-                      Maksimalna veličina: 50MB
+                      Max: 10MB za slike, 30MB za video
                     </p>
                   </>
                 )}
@@ -462,15 +513,18 @@ export default function PortfolioModal({ isOpen, onClose, onAdd }: PortfolioModa
 
               <button
                 onClick={handleUploadSubmit}
-                disabled={!uploadedFile}
-                className="w-full py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!uploadedFile || isUploading}
+                className="w-full py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                Dodaj fajl
+                {isUploading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Uploadujem...
+                  </>
+                ) : (
+                  'Dodaj fajl'
+                )}
               </button>
-
-              <p className="text-xs text-muted text-center">
-                💡 U demo modu, fajlovi se čuvaju lokalno. U produkciji bi se uploadovali na cloud storage.
-              </p>
             </div>
           )}
         </div>

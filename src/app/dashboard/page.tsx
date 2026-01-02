@@ -36,62 +36,17 @@ export default function DashboardPage() {
 }
 
 function CreatorDashboard() {
-  const { getReviewsForCreator, addReplyToReview, updateReplyToReview, deleteReplyFromReview, getOwnCreatorStatus, updateCreator, getOwnCreatorId, getCreatorById, isHydrated, currentUser } = useDemo();
+  const { addReplyToReview, updateReplyToReview, deleteReplyFromReview, updateCreator, isHydrated, currentUser } = useDemo();
   
-  // Get the creator's own profile
-  const ownCreatorId = getOwnCreatorId();
-  const ownCreator = ownCreatorId ? getCreatorById(ownCreatorId) : null;
+  // ALL HOOKS MUST BE AT TOP - before any conditional returns
+  const [creator, setCreator] = useState<any>(null);
+  const [isLoadingCreator, setIsLoadingCreator] = useState(true);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [isLoadingReviews, setIsLoadingReviews] = useState(true);
   
-  // Check if this is a demo user (Marija Petrović - ID "1")
-  // Demo users should always work normally for presentation purposes
-  const isDemoCreator = currentUser.creatorId === '1' || ownCreatorId === '1';
-  
-  // Get creator status
-  const creatorStatus = getOwnCreatorStatus();
-  
-  // Wait for hydration
-  if (!isHydrated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-muted">Učitavanje...</div>
-      </div>
-    );
-  }
-  
-  // If no creator profile found, show error
-  if (!ownCreator) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-medium mb-4">Profil nije pronađen</h1>
-          <p className="text-muted mb-6">Nismo pronašli vaš kreator profil.</p>
-          <Link href="/" className="text-primary hover:underline">
-            Nazad na početnu
-          </Link>
-        </div>
-      </div>
-    );
-  }
-  
-  // Use the real creator data
-  const creator = ownCreator;
-  
-  // Skip pending/rejected checks for demo creator (ID "1" - Marija Petrović)
-  // This allows demo to work for client presentations
-  if (!isDemoCreator) {
-    // If creator is pending - show pending screen
-    if (creatorStatus?.status === 'pending' || (!creatorStatus?.status && !creator.approved)) {
-      return <CreatorPendingScreen />;
-    }
-    
-    // If creator is rejected - show rejection screen
-    if (creatorStatus?.status === 'rejected') {
-      return <CreatorRejectedScreen rejectionReason={creatorStatus.rejectionReason} />;
-    }
-  }
   const [activeTab, setActiveTab] = useState<'overview' | 'reviews'>('overview');
   
-  // Inline editing states for each section
+  // Inline editing states
   const [editingBio, setEditingBio] = useState(false);
   const [editingCategories, setEditingCategories] = useState(false);
   const [editingPlatforms, setEditingPlatforms] = useState(false);
@@ -107,6 +62,7 @@ function CreatorDashboard() {
   });
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   
   // Portfolio state
   const [showPortfolioModal, setShowPortfolioModal] = useState(false);
@@ -120,28 +76,133 @@ function CreatorDashboard() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>(
-    creator.portfolio.map((item, index) => ({
-      id: `existing-${index}`,
-      type: item.type,
-      url: item.url,
-      thumbnail: item.thumbnail,
-    }))
-  );
+  const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
   
   // Editable form values
-  const [bio, setBio] = useState(creator.bio);
-  const [categories, setCategories] = useState<string[]>(creator.categories);
-  const [platforms, setPlatforms] = useState<string[]>(creator.platforms);
-  const [languages, setLanguages] = useState<string[]>(creator.languages);
+  const [bio, setBio] = useState('');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [platforms, setPlatforms] = useState<string[]>([]);
+  const [languages, setLanguages] = useState<string[]>([]);
   const [contactInfo, setContactInfo] = useState({
-    email: creator.email,
-    phone: creator.phone || '',
-    instagram: creator.instagram || '',
-    tiktok: creator.tiktok || '',
-    youtube: creator.youtube || '',
-    priceFrom: creator.priceFrom,
+    email: '',
+    phone: '',
+    instagram: '',
+    tiktok: '',
+    youtube: '',
+    priceFrom: 0,
   });
+  
+  // Fetch creator data from Supabase
+  useEffect(() => {
+    const fetchCreator = async () => {
+      if (!currentUser.creatorId) {
+        setIsLoadingCreator(false);
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/creators/${currentUser.creatorId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setCreator(data.creator);
+        }
+      } catch (error) {
+        console.error('Error fetching creator:', error);
+      } finally {
+        setIsLoadingCreator(false);
+      }
+    };
+    
+    fetchCreator();
+  }, [currentUser.creatorId]);
+  
+  // Update form values when creator data is loaded
+  useEffect(() => {
+    if (creator) {
+      setBio(creator.bio || '');
+      setCategories(creator.categories || []);
+      setPlatforms(creator.platforms || []);
+      setLanguages(creator.languages || []);
+      setContactInfo({
+        email: creator.email || '',
+        phone: creator.phone || '',
+        instagram: creator.instagram || '',
+        tiktok: creator.tiktok || '',
+        youtube: creator.youtube || '',
+        priceFrom: creator.priceFrom || 0,
+      });
+      setPortfolioItems(
+        (creator.portfolio || []).map((item: any, index: number) => ({
+          id: `existing-${index}`,
+          type: item.type,
+          url: item.url,
+          thumbnail: item.thumbnail,
+          description: item.description,
+          platform: item.platform,
+        }))
+      );
+    }
+  }, [creator]);
+  
+  // Fetch reviews from Supabase
+  useEffect(() => {
+    const fetchReviews = async () => {
+      if (!currentUser.creatorId) {
+        setIsLoadingReviews(false);
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/reviews?creatorId=${currentUser.creatorId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setReviews(data.reviews || []);
+        }
+      } catch (error) {
+        console.error('Error fetching reviews:', error);
+      } finally {
+        setIsLoadingReviews(false);
+      }
+    };
+    
+    fetchReviews();
+  }, [currentUser.creatorId]);
+  
+  // Show loading state
+  if (!isHydrated || isLoadingCreator) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted">Učitavanje...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // If no creator profile found, show error
+  if (!creator) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-medium mb-4">Profil nije pronađen</h1>
+          <p className="text-muted mb-6">Nismo pronašli vaš kreator profil.</p>
+          <Link href="/" className="text-primary hover:underline">
+            Nazad na početnu
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  
+  // Check creator status for pending/rejected
+  if (creator.status === 'pending') {
+    return <CreatorPendingScreen />;
+  }
+  
+  if (creator.status === 'rejected') {
+    return <CreatorRejectedScreen rejectionReason={creator.rejectionReason} />;
+  }
   
   // Portfolio handlers
   const handleAddPortfolioItem = (item: PortfolioItem) => {
@@ -166,11 +227,11 @@ function CreatorDashboard() {
   const availablePlatforms = ['Instagram', 'TikTok', 'YouTube'];
   const availableLanguages = ['Srpski', 'Engleski', 'Nemački', 'Francuski', 'Španski', 'Italijanski'];
   
-  // Get reviews for this creator
-  const allReviews = getReviewsForCreator(creator.id, false); // Include pending
-  const approvedReviews = allReviews.filter(r => r.status === 'approved');
-  const pendingReviews = allReviews.filter(r => r.status === 'pending');
-  const stats = generateReviewStats(allReviews);
+  // Use fetched reviews from Supabase
+  const allReviews = reviews;
+  const approvedReviews = reviews.filter(r => r.status === 'approved');
+  const pendingReviews = reviews.filter(r => r.status === 'pending');
+  const stats = generateReviewStats(reviews);
 
   // Pencil icon component
   const PencilButton = ({ onClick, editing }: { onClick: () => void; editing?: boolean }) => (
@@ -185,41 +246,66 @@ function CreatorDashboard() {
     </button>
   );
 
-  const handleSaveSection = (section: string) => {
-    console.log(`📝 [DEMO] ${section} would be updated`);
+  const handleSaveSection = async (section: string) => {
+    setIsSaving(true);
     
-    // Update creator in demo context
-    if (section === 'bio') {
-      updateCreator(creator.id, { bio: bio });
-      setEditingBio(false);
-    } else if (section === 'categories') {
-      updateCreator(creator.id, { categories: categories });
-      setEditingCategories(false);
-    } else if (section === 'platforms') {
-      updateCreator(creator.id, { platforms: platforms });
-      setEditingPlatforms(false);
-    } else if (section === 'languages') {
-      updateCreator(creator.id, { languages: languages });
-      setEditingLanguages(false);
-    } else if (section === 'contact') {
-      updateCreator(creator.id, {
-        email: contactInfo.email,
-        phone: contactInfo.phone || undefined,
-        instagram: contactInfo.instagram || undefined,
-        tiktok: contactInfo.tiktok || undefined,
-        youtube: contactInfo.youtube || undefined,
-        priceFrom: contactInfo.priceFrom,
+    try {
+      let updateData: any = {};
+      
+      if (section === 'bio') {
+        updateData = { bio };
+      } else if (section === 'categories') {
+        updateData = { categories };
+      } else if (section === 'platforms') {
+        updateData = { platforms };
+      } else if (section === 'languages') {
+        updateData = { languages };
+      } else if (section === 'contact') {
+        updateData = {
+          email: contactInfo.email,
+          phone: contactInfo.phone || null,
+          instagram: contactInfo.instagram || null,
+          tiktok: contactInfo.tiktok || null,
+          youtube: contactInfo.youtube || null,
+          price_from: contactInfo.priceFrom,
+        };
+      }
+      
+      // Save to Supabase
+      const response = await fetch(`/api/creators/${creator.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData),
       });
-      setEditingContact(false);
+      
+      if (!response.ok) {
+        throw new Error('Failed to save');
+      }
+      
+      // Update local state
+      setCreator({ ...creator, ...updateData });
+      
+      // Close editing mode
+      if (section === 'bio') setEditingBio(false);
+      else if (section === 'categories') setEditingCategories(false);
+      else if (section === 'platforms') setEditingPlatforms(false);
+      else if (section === 'languages') setEditingLanguages(false);
+      else if (section === 'contact') setEditingContact(false);
+      
+    } catch (error) {
+      console.error('Save error:', error);
+      alert('Greška prilikom čuvanja. Pokušajte ponovo.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     setPasswordError('');
     setPasswordSuccess(false);
 
     // Validation
-    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+    if (!passwordForm.newPassword || !passwordForm.confirmPassword) {
       setPasswordError('Sva polja su obavezna');
       return;
     }
@@ -234,32 +320,35 @@ function CreatorDashboard() {
       return;
     }
 
-    if (passwordForm.currentPassword === passwordForm.newPassword) {
-      setPasswordError('Nova lozinka mora biti različita od trenutne');
-      return;
+    try {
+      // Import supabase client
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+      
+      const { error } = await supabase.auth.updateUser({
+        password: passwordForm.newPassword,
+      });
+
+      if (error) {
+        setPasswordError(error.message);
+        return;
+      }
+
+      // Success
+      setPasswordForm({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      });
+      setPasswordSuccess(true);
+      setTimeout(() => {
+        setPasswordSuccess(false);
+        setEditingPassword(false);
+      }, 2000);
+    } catch (error: any) {
+      setPasswordError('Greška prilikom promene lozinke');
+      console.error('Password change error:', error);
     }
-
-    // In production, this would call API endpoint
-    // const response = await fetch('/api/settings/password', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({
-    //     currentPassword: passwordForm.currentPassword,
-    //     newPassword: passwordForm.newPassword,
-    //   }),
-    // });
-
-    // Demo mode: simulate success
-    setPasswordForm({
-      currentPassword: '',
-      newPassword: '',
-      confirmPassword: '',
-    });
-    setPasswordSuccess(true);
-    setTimeout(() => {
-      setPasswordSuccess(false);
-      setEditingPassword(false);
-    }, 2000);
   };
 
   const toggleArrayItem = (arr: string[], item: string, setArr: (arr: string[]) => void) => {
@@ -313,7 +402,7 @@ function CreatorDashboard() {
 
   const tabs = [
     { id: 'overview' as const, label: 'Pregled', count: null },
-    { id: 'reviews' as const, label: 'Recenzije', count: allReviews.length },
+    { id: 'reviews' as const, label: 'Statistika', count: allReviews.length > 0 ? allReviews.length : null },
   ];
 
   return (
@@ -358,21 +447,6 @@ function CreatorDashboard() {
               )}
             </button>
           ))}
-        </div>
-
-        {/* Stats - below tabs */}
-        <div className="mb-8">
-          <h2 className="text-lg font-medium mb-6">Statistika profila</h2>
-          <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-2xl p-6 border border-border text-center">
-            <div className="text-3xl font-light mb-1">{creator.profileViews || 0}</div>
-            <div className="text-sm text-muted">Pregleda profila</div>
-          </div>
-          <div className="bg-white rounded-2xl p-6 border border-border text-center">
-            <div className="text-3xl font-light mb-1">{stats.averageRating.toFixed(1)}</div>
-            <div className="text-sm text-muted">Prosečna ocena</div>
-          </div>
-          </div>
         </div>
 
         {activeTab === 'overview' && (
@@ -782,6 +856,7 @@ function CreatorDashboard() {
                 isOpen={showPortfolioModal}
                 onClose={() => setShowPortfolioModal(false)}
                 onAdd={handleAddPortfolioItem}
+                creatorId={creator?.id}
               />
 
               {/* Video Player Modal */}
@@ -797,35 +872,47 @@ function CreatorDashboard() {
               {/* Image Zoom Modal */}
               {activeImage && (
                 <div 
-                  className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4"
+                  className="fixed inset-0 bg-black/95 flex items-center justify-center z-50"
                   onClick={() => setActiveImage(null)}
+                  onKeyDown={(e) => e.key === 'Escape' && setActiveImage(null)}
+                  tabIndex={0}
+                  ref={(el) => el?.focus()}
                 >
+                  {/* Close button - fixed position, always visible */}
+                  <button
+                    onClick={() => setActiveImage(null)}
+                    className="absolute top-6 right-6 z-10 bg-white text-black p-3 rounded-full shadow-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                  
                   <div 
-                    className="relative max-w-7xl max-h-[90vh] w-full h-full flex items-center justify-center"
+                    className="relative w-full h-full flex items-center justify-center p-4"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <Image
-                      src={activeImage.thumbnail}
-                      alt={activeImage.description || 'Portfolio image'}
-                      fill
-                      className="object-contain"
-                      unoptimized={activeImage.thumbnail.startsWith('data:')}
-                    />
-                    {/* Close button */}
-                    <button
-                      onClick={() => setActiveImage(null)}
-                      className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 text-white p-3 rounded-full transition-colors"
-                    >
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                    {/* Description if available */}
-                    {activeImage.description && (
-                      <div className="absolute bottom-4 left-4 right-4 bg-black/60 text-white p-4 rounded-lg max-w-2xl">
-                        <p className="text-sm">{activeImage.description}</p>
-                      </div>
-                    )}
+                    {/* Image container */}
+                    <div className="relative max-w-5xl max-h-[85vh] w-full h-full">
+                      <Image
+                        src={activeImage.thumbnail}
+                        alt={activeImage.description || 'Portfolio image'}
+                        fill
+                        className="object-contain"
+                        unoptimized={activeImage.thumbnail.startsWith('data:')}
+                      />
+                      {/* Description overlay - inside image area */}
+                      {activeImage.description && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent p-6 pt-12">
+                          <p className="text-white text-sm whitespace-pre-wrap max-w-2xl">{activeImage.description}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* ESC hint - hidden on mobile */}
+                  <div className="hidden sm:block absolute bottom-6 left-1/2 -translate-x-1/2 text-white/50 text-xs">
+                    Pritisni ESC za zatvaranje
                   </div>
                 </div>
               )}
@@ -871,18 +958,49 @@ function CreatorDashboard() {
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setDetailItem(null);
-                        setActiveVideo(detailItem);
-                      }}
-                      className="mt-6 w-full py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                      Pusti video
-                    </button>
+                    {/* Show button only for videos, not for images */}
+                    {(() => {
+                      const isImage = detailItem.type === 'upload' && 
+                        (detailItem.thumbnail?.match(/\.(jpg|jpeg|png|gif|webp)$/i) || 
+                         detailItem.url?.match(/\.(jpg|jpeg|png|gif|webp)$/i));
+                      const isVideo = detailItem.type === 'youtube' || 
+                        detailItem.type === 'tiktok' || 
+                        detailItem.type === 'instagram' ||
+                        (detailItem.type === 'upload' && !isImage);
+                      
+                      if (isVideo) {
+                        return (
+                          <button
+                            onClick={() => {
+                              setDetailItem(null);
+                              setActiveVideo(detailItem);
+                            }}
+                            className="mt-6 w-full py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                            Pusti video
+                          </button>
+                        );
+                      } else if (isImage) {
+                        return (
+                          <button
+                            onClick={() => {
+                              setDetailItem(null);
+                              setActiveImage(detailItem);
+                            }}
+                            className="mt-6 w-full py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+                            </svg>
+                            Pogledaj sliku
+                          </button>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 </div>
               )}
@@ -1188,26 +1306,35 @@ function CreatorDashboard() {
 
         {activeTab === 'reviews' && (
           <div className="space-y-8">
-            {/* Reviews header */}
+            {/* Statistics section */}
             <div className="bg-white rounded-2xl p-6 border border-border">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-medium mb-1">Tvoje recenzije</h2>
-                  <p className="text-sm text-muted">
-                    Ocene koje su ti ostavili brendovi
-                  </p>
+              <h2 className="text-lg font-medium mb-6">Statistika profila</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="text-center p-4 bg-secondary/30 rounded-xl">
+                  <div className="text-3xl font-light mb-1">{creator.profileViews || 0}</div>
+                  <div className="text-sm text-muted">Pregleda profila</div>
                 </div>
-                <div className="flex items-center gap-8">
-                  <div className="text-center">
-                    <div className="text-3xl font-light">{stats.averageRating.toFixed(1)}</div>
-                    <p className="text-sm text-muted">Prosečna ocena</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-light">{allReviews.length}</div>
-                    <p className="text-sm text-muted">Ukupno recenzija</p>
-                  </div>
+                <div className="text-center p-4 bg-secondary/30 rounded-xl">
+                  <div className="text-3xl font-light mb-1">{stats.averageRating.toFixed(1)}</div>
+                  <div className="text-sm text-muted">Prosečna ocena</div>
+                </div>
+                <div className="text-center p-4 bg-secondary/30 rounded-xl">
+                  <div className="text-3xl font-light mb-1">{allReviews.length}</div>
+                  <div className="text-sm text-muted">Ukupno recenzija</div>
+                </div>
+                <div className="text-center p-4 bg-secondary/30 rounded-xl">
+                  <div className="text-3xl font-light mb-1">{approvedReviews.length}</div>
+                  <div className="text-sm text-muted">Odobrenih</div>
                 </div>
               </div>
+            </div>
+
+            {/* Reviews header */}
+            <div className="bg-white rounded-2xl p-6 border border-border">
+              <h2 className="text-lg font-medium mb-1">Tvoje recenzije</h2>
+              <p className="text-sm text-muted">
+                Ocene koje su ti ostavili brendovi
+              </p>
             </div>
 
             {/* Pending reviews notice */}

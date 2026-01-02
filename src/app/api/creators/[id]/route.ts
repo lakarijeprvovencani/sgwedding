@@ -1,280 +1,110 @@
-/**
- * API Route: /api/creators/[id]
- * 
- * TRENUTNO: Vraća mock podatke
- * BUDUĆE: Povezuje se sa bazom podataka
- * 
- * Endpoints:
- * - GET /api/creators/[id] - Pojedinačni kreator
- * - PUT /api/creators/[id] - Ažuriranje kreatora
- * - DELETE /api/creators/[id] - Brisanje kreatora
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { mockCreators, Creator, CreatorStatus } from '@/lib/mockData';
-import type { ApiResponse, UpdateCreatorInput } from '@/types';
+import { createAdminClient } from '@/lib/supabase/server';
 
-// ============================================
-// GET - Pojedinačni kreator
-// ============================================
-
+// GET /api/creators/[id] - Dohvati pojedinačnog kreatora
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    
-    // ============================================
-    // TRENUTNO: Mock implementacija
-    // ============================================
-    
-    const creator = mockCreators.find(c => c.id === id);
-    
-    if (!creator) {
-      return NextResponse.json(
-        { success: false, error: 'Creator not found' },
-        { status: 404 }
-      );
+
+    const supabase = createAdminClient();
+
+    const { data: creator, error } = await supabase
+      .from('creators')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !creator) {
+      console.error('Error fetching creator:', error);
+      return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
-    
-    const response: ApiResponse<Creator> = {
-      success: true,
-      data: creator,
+
+    // Transformiši podatke u format koji frontend očekuje
+    const formattedCreator = {
+      id: creator.id,
+      name: creator.name,
+      photo: creator.photo || null,
+      categories: creator.categories || [],
+      platforms: creator.platforms || [],
+      languages: creator.languages || ['Srpski'],
+      location: creator.location || 'Srbija',
+      bio: creator.bio || '',
+      priceFrom: creator.price_from || 0,
+      rating: creator.average_rating || 0,
+      totalReviews: creator.total_reviews || 0,
+      profileViews: creator.profile_views || 0,
+      status: creator.status,
+      approved: creator.status === 'approved',
+      // Kontakt info
+      email: creator.email,
+      phone: creator.phone,
+      instagram: creator.instagram,
+      tiktok: creator.tiktok,
+      youtube: creator.youtube,
+      website: creator.website,
+      // Dodatna polja
+      niches: creator.niches || [],
+      portfolio: creator.portfolio || [],
+      createdAt: creator.created_at,
+      userId: creator.user_id,
     };
-    
-    return NextResponse.json(response);
-    
-    // ============================================
-    // BUDUĆE: Prisma implementacija
-    // ============================================
-    
-    /*
-    const creator = await prisma.creator.findUnique({
-      where: { id },
-      include: { portfolio: true },
-    });
-    
-    if (!creator) {
-      return NextResponse.json(
-        { success: false, error: 'Creator not found' },
-        { status: 404 }
-      );
-    }
-    
-    return NextResponse.json({
-      success: true,
-      data: creator,
-    });
-    */
-    
-  } catch (error) {
-    console.error('Error fetching creator:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch creator' },
-      { status: 500 }
-    );
+
+    return NextResponse.json({ creator: formattedCreator });
+
+  } catch (error: any) {
+    console.error('Creator fetch error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// ============================================
-// PUT - Ažuriranje kreatora
-// ============================================
-
+// PUT /api/creators/[id] - Ažuriraj kreatora
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const body: UpdateCreatorInput = await request.json();
+    const body = await request.json();
+
+    const supabase = createAdminClient();
+
+    // Mapiranje frontend polja na database polja
+    const updateData: any = {};
     
-    // ============================================
-    // TRENUTNO: Mock implementacija
-    // ============================================
-    
-    const creatorIndex = mockCreators.findIndex(c => c.id === id);
-    
-    if (creatorIndex === -1) {
-      return NextResponse.json(
-        { success: false, error: 'Creator not found' },
-        { status: 404 }
-      );
+    if (body.bio !== undefined) updateData.bio = body.bio;
+    if (body.categories !== undefined) updateData.categories = body.categories;
+    if (body.platforms !== undefined) updateData.platforms = body.platforms;
+    if (body.languages !== undefined) updateData.languages = body.languages;
+    if (body.email !== undefined) updateData.email = body.email;
+    if (body.phone !== undefined) updateData.phone = body.phone;
+    if (body.instagram !== undefined) updateData.instagram = body.instagram;
+    if (body.tiktok !== undefined) updateData.tiktok = body.tiktok;
+    if (body.youtube !== undefined) updateData.youtube = body.youtube;
+    if (body.price_from !== undefined) updateData.price_from = body.price_from;
+    if (body.photo !== undefined) updateData.photo = body.photo;
+    if (body.portfolio !== undefined) updateData.portfolio = body.portfolio;
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.location !== undefined) updateData.location = body.location;
+
+    const { data: creator, error } = await supabase
+      .from('creators')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating creator:', error);
+      return NextResponse.json({ error: 'Failed to update creator' }, { status: 500 });
     }
-    
-    // Simulacija ažuriranja (u produkciji bi se sačuvalo u bazu)
-    const updatedCreator: Creator = {
-      ...mockCreators[creatorIndex],
-      ...body,
-      // Osiguraj da status bude ispravan tip
-      status: body.status as CreatorStatus | undefined,
-    };
-    
-    const response: ApiResponse<Creator> = {
-      success: true,
-      data: updatedCreator,
-      message: 'Creator updated successfully',
-    };
-    
-    return NextResponse.json(response);
-    
-    // ============================================
-    // BUDUĆE: Prisma implementacija
-    // ============================================
-    
-    /*
-    // Provera autorizacije
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-    
-    // Provera da li korisnik ima pravo da uređuje
-    const creator = await prisma.creator.findUnique({
-      where: { id },
-      include: { user: true },
-    });
-    
-    if (!creator) {
-      return NextResponse.json(
-        { success: false, error: 'Creator not found' },
-        { status: 404 }
-      );
-    }
-    
-    const canEdit = 
-      session.user.role === 'ADMIN' || 
-      creator.userId === session.user.id;
-    
-    if (!canEdit) {
-      return NextResponse.json(
-        { success: false, error: 'Forbidden' },
-        { status: 403 }
-      );
-    }
-    
-    const updatedCreator = await prisma.creator.update({
-      where: { id },
-      data: {
-        ...(body.name && { name: body.name }),
-        ...(body.bio && { bio: body.bio }),
-        ...(body.photo && { photo: body.photo }),
-        ...(body.categories && { categories: body.categories }),
-        ...(body.platforms && { platforms: body.platforms }),
-        ...(body.languages && { languages: body.languages }),
-        ...(body.location && { location: body.location }),
-        ...(body.priceFrom !== undefined && { priceFrom: body.priceFrom }),
-        ...(body.phone !== undefined && { phone: body.phone }),
-        ...(body.instagram !== undefined && { instagram: body.instagram }),
-        ...(body.tiktok !== undefined && { tiktok: body.tiktok }),
-        ...(body.youtube !== undefined && { youtube: body.youtube }),
-        ...(body.status && { status: body.status.toUpperCase() }),
-        ...(body.approved !== undefined && { approved: body.approved }),
-      },
-      include: { portfolio: true },
-    });
-    
-    return NextResponse.json({
-      success: true,
-      data: updatedCreator,
-      message: 'Creator updated successfully',
-    });
-    */
-    
-  } catch (error) {
-    console.error('Error updating creator:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update creator' },
-      { status: 500 }
-    );
+
+    return NextResponse.json({ success: true, creator });
+
+  } catch (error: any) {
+    console.error('Creator update error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
-// ============================================
-// DELETE - Brisanje kreatora
-// ============================================
-
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    
-    // ============================================
-    // TRENUTNO: Mock implementacija
-    // ============================================
-    
-    const creatorIndex = mockCreators.findIndex(c => c.id === id);
-    
-    if (creatorIndex === -1) {
-      return NextResponse.json(
-        { success: false, error: 'Creator not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Simulacija brisanja
-    const response: ApiResponse<null> = {
-      success: true,
-      message: 'Creator deleted successfully',
-    };
-    
-    return NextResponse.json(response);
-    
-    // ============================================
-    // BUDUĆE: Prisma implementacija
-    // ============================================
-    
-    /*
-    // Provera autorizacije - samo admin može da briše
-    const session = await getSession();
-    if (!session || session.user.role !== 'ADMIN') {
-      return NextResponse.json(
-        { success: false, error: 'Forbidden' },
-        { status: 403 }
-      );
-    }
-    
-    // Provera da li kreator postoji
-    const creator = await prisma.creator.findUnique({
-      where: { id },
-    });
-    
-    if (!creator) {
-      return NextResponse.json(
-        { success: false, error: 'Creator not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Soft delete - samo promena statusa
-    await prisma.creator.update({
-      where: { id },
-      data: { 
-        status: 'DEACTIVATED',
-        approved: false,
-      },
-    });
-    
-    // Ili hard delete ako je potrebno:
-    // await prisma.creator.delete({ where: { id } });
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Creator deleted successfully',
-    });
-    */
-    
-  } catch (error) {
-    console.error('Error deleting creator:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to delete creator' },
-      { status: 500 }
-    );
-  }
-}
-

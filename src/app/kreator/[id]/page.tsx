@@ -20,7 +20,6 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
     isLoggedIn, 
     isHydrated, 
     isOwnProfile,
-    getCreatorById, 
     updateCreator, 
     deleteCreator,
     getReviewsForCreator,
@@ -43,8 +42,9 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
   // Check if current user is a pending/rejected creator
   const ownCreatorStatus = getOwnCreatorStatus();
   
-  // Get creator from context (with any saved modifications)
-  const savedCreator = getCreatorById(resolvedParams.id);
+  // State for creator fetched from Supabase
+  const [fetchedCreator, setFetchedCreator] = useState<Creator | null>(null);
+  const [isLoadingCreator, setIsLoadingCreator] = useState(true);
   
   // ALL HOOKS MUST BE AT THE TOP - before any conditional returns
   const [isEditing, setIsEditing] = useState(false);
@@ -52,6 +52,28 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleted, setIsDeleted] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  
+  // Fetch creator from Supabase API
+  useEffect(() => {
+    const fetchCreator = async () => {
+      try {
+        const response = await fetch(`/api/creators/${resolvedParams.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setFetchedCreator(data.creator);
+        } else {
+          setFetchedCreator(null);
+        }
+      } catch (error) {
+        console.error('Error fetching creator:', error);
+        setFetchedCreator(null);
+      } finally {
+        setIsLoadingCreator(false);
+      }
+    };
+    
+    fetchCreator();
+  }, [resolvedParams.id]);
   
   // Review states
   const [showReviewForm, setShowReviewForm] = useState(false);
@@ -116,20 +138,13 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
     return false; // guest
   }, [currentUser, liveSubscriptionStatus]);
   
-  // Update state after hydration - only run once when hydrated
+  // Update editedCreator when fetchedCreator is loaded
   useEffect(() => {
-    if (isHydrated) {
-      const creator = getCreatorById(resolvedParams.id);
-      if (creator) {
-        setEditedCreator(creator);
-        setIsDeleted(false);
-      } else {
-        // Creator was deleted or doesn't exist
-        setIsDeleted(true);
-      }
+    if (fetchedCreator) {
+      setEditedCreator(fetchedCreator);
+      setIsDeleted(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHydrated, resolvedParams.id]);
+  }, [fetchedCreator]);
   
   // Track as recently viewed and increment profile views (for business users)
   useEffect(() => {
@@ -151,8 +166,20 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
     }
   }, [isHydrated, currentUser.type, currentUser.businessId, resolvedParams.id, addToRecentlyViewed, incrementProfileViews]);
   
-  // Use edited version if available, otherwise saved
-  const creator = editedCreator || savedCreator;
+  // Use edited version if available, otherwise fetched from Supabase
+  const creator = editedCreator || fetchedCreator;
+  
+  // Show loading while fetching creator
+  if (isLoadingCreator) {
+    return (
+      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center bg-secondary/30">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted">Učitavanje profila...</p>
+        </div>
+      </div>
+    );
+  }
   
   // Show loading while checking subscription for business users
   if (isHydrated && currentUser.type === 'business' && isCheckingSubscription) {
@@ -472,8 +499,8 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
                 {isAdmin && (
                   <button
                     onClick={() => {
-                      if (savedCreator) {
-                        setEditedCreator(savedCreator);
+                      if (fetchedCreator) {
+                        setEditedCreator(fetchedCreator);
                       }
                       setIsEditing(true);
                     }}
@@ -1215,7 +1242,7 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
             <div className="sticky bottom-0 bg-white border-t border-border px-8 py-6 flex justify-end gap-4">
               <button
                 onClick={() => {
-                  setEditedCreator(savedCreator || null);
+                  setEditedCreator(fetchedCreator || null);
                   setIsEditing(false);
                   setShowStatusDropdown(false);
                 }}
