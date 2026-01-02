@@ -1190,20 +1190,22 @@ function CreatorDashboard() {
           <div className="space-y-8">
             {/* Reviews header */}
             <div className="bg-white rounded-2xl p-6 border border-border">
-              <div className="grid md:grid-cols-3 gap-6">
-                <div className="text-center md:text-left">
-                  <h2 className="text-lg font-medium mb-2">Tvoje recenzije</h2>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-medium mb-1">Tvoje recenzije</h2>
                   <p className="text-sm text-muted">
                     Ocene koje su ti ostavili brendovi
                   </p>
                 </div>
-                <div className="text-center">
-                  <div className="text-4xl font-light mb-1">{stats.averageRating.toFixed(1)}</div>
-                  <AverageRating rating={stats.averageRating} totalReviews={stats.totalReviews} size="sm" />
-                </div>
-                <div className="text-center md:text-right">
-                  <div className="text-2xl font-light mb-1">{allReviews.length}</div>
-                  <p className="text-sm text-muted">Ukupno recenzija</p>
+                <div className="flex items-center gap-8">
+                  <div className="text-center">
+                    <div className="text-3xl font-light">{stats.averageRating.toFixed(1)}</div>
+                    <p className="text-sm text-muted">Prosečna ocena</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-light">{allReviews.length}</div>
+                    <p className="text-sm text-muted">Ukupno recenzija</p>
+                  </div>
                 </div>
               </div>
             </div>
