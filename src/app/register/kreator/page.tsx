@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { categories, platforms, languages } from '@/lib/mockData';
+import { platforms, languages } from '@/lib/mockData';
 import Image from 'next/image';
 import ImageCropper from '@/components/ImageCropper';
 
@@ -54,6 +54,29 @@ export default function RegisterCreatorPage() {
   const [portfolioDescription, setPortfolioDescription] = useState('');
   const [portfolioError, setPortfolioError] = useState('');
   const [showAddPortfolio, setShowAddPortfolio] = useState(true);
+  
+  // Categories from database
+  const [categories, setCategories] = useState<string[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
+  
+  // Fetch categories from database
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch('/api/categories');
+        if (response.ok) {
+          const data = await response.json();
+          setCategories(data.categories || []);
+        }
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+      } finally {
+        setIsLoadingCategories(false);
+      }
+    };
+    
+    fetchCategories();
+  }, []);
 
   const handleCategoryToggle = (category: string) => {
     setFormData(prev => ({
@@ -496,22 +519,29 @@ export default function RegisterCreatorPage() {
 
               <div>
                 <label className="text-sm text-muted mb-3 block">Kategorije (izaberi do 5) *</label>
-                <div className="flex flex-wrap gap-2">
-                  {categories.map((category) => (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => handleCategoryToggle(category)}
-                      className={`px-4 py-2 rounded-full text-sm transition-colors ${
-                        formData.categories.includes(category)
-                          ? 'bg-primary text-white'
-                          : 'bg-secondary hover:bg-accent'
-                      }`}
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
+                {isLoadingCategories ? (
+                  <div className="flex items-center gap-2 text-muted text-sm">
+                    <div className="w-4 h-4 border-2 border-muted/30 border-t-muted rounded-full animate-spin"></div>
+                    Učitavanje kategorija...
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {categories.map((category) => (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => handleCategoryToggle(category)}
+                        className={`px-4 py-2 rounded-full text-sm transition-colors ${
+                          formData.categories.includes(category)
+                            ? 'bg-primary text-white'
+                            : 'bg-secondary hover:bg-accent'
+                        }`}
+                      >
+                        {category}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>

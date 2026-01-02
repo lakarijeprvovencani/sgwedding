@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
-import { categories, platforms, languages } from '@/lib/mockData';
+import { platforms, languages } from '@/lib/mockData';
 import CreatorCard from '@/components/CreatorCard';
 import { useDemo } from '@/context/DemoContext';
 import { createClient } from '@/lib/supabase/client';
@@ -24,8 +24,28 @@ export default function KreatoriPage() {
   const [allCreators, setAllCreators] = useState<any[]>([]);
   const [isLoadingCreators, setIsLoadingCreators] = useState(true);
   
+  // Categories from database
+  const [categories, setCategories] = useState<string[]>([]);
+  
   // Get creator status for pending check
   const creatorStatus = getOwnCreatorStatus();
+  
+  // Fetch categories from database
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch('/api/categories');
+        if (response.ok) {
+          const data = await response.json();
+          setCategories(data.categories || []);
+        }
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+      }
+    };
+    
+    fetchCategories();
+  }, []);
   
   // Fetch creators from Supabase
   useEffect(() => {

@@ -1,11 +1,37 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { mockCreators, categories } from '@/lib/mockData';
 
 export default function Home() {
-  const featuredCreators = mockCreators.slice(0, 4);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [featuredCreators, setFeaturedCreators] = useState<any[]>([]);
+  
+  // Fetch categories and featured creators from database
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch categories
+        const catResponse = await fetch('/api/categories');
+        if (catResponse.ok) {
+          const catData = await catResponse.json();
+          setCategories(catData.categories || []);
+        }
+        
+        // Fetch featured creators (first 4 approved)
+        const creatorsResponse = await fetch('/api/creators?limit=4');
+        if (creatorsResponse.ok) {
+          const creatorsData = await creatorsResponse.json();
+          setFeaturedCreators(creatorsData.creators || []);
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      }
+    };
+    
+    fetchData();
+  }, []);
 
   return (
     <div>
@@ -167,7 +193,7 @@ export default function Home() {
                 </div>
                 <div className="font-medium">{category}</div>
                 <div className="text-sm text-muted group-hover:text-white/70 mt-1">
-                  {mockCreators.filter(c => c.categories.includes(category)).length} kreatora
+                  Pregledaj →
                 </div>
               </Link>
             ))}

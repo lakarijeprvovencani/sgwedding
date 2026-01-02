@@ -127,7 +127,14 @@ export default function LoginPage() {
           return;
         }
 
-        // Dozvoli login bez obzira na status pretplate
+        // Proveri da li je nalog deaktiviran od strane admina
+        if (businessData.subscription_status === 'deactivated') {
+          setError('Vaš nalog je deaktiviran. Kontaktirajte podršku za više informacija.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Dozvoli login bez obzira na status pretplate (expired je OK)
         // Dashboard će prikazati opciju za obnovu ako je pretplata istekla
         loginAsNewBusiness(businessData.id, businessData.company_name, businessData.subscription_status, businessData.subscription_type);
         router.push('/dashboard');

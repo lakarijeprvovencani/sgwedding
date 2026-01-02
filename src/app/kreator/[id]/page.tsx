@@ -3,7 +3,7 @@
 import { use, useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Creator, CreatorStatus, categories, platforms, languages } from '@/lib/mockData';
+import { Creator, CreatorStatus, platforms, languages } from '@/lib/mockData';
 import { useDemo } from '@/context/DemoContext';
 import ReviewList from '@/components/ReviewList';
 import ReviewForm from '@/components/ReviewForm';
@@ -46,12 +46,31 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
   const [fetchedCreator, setFetchedCreator] = useState<Creator | null>(null);
   const [isLoadingCreator, setIsLoadingCreator] = useState(true);
   
+  // Categories from database
+  const [categories, setCategories] = useState<string[]>([]);
+  
   // ALL HOOKS MUST BE AT THE TOP - before any conditional returns
   const [isEditing, setIsEditing] = useState(false);
   const [editedCreator, setEditedCreator] = useState<Creator | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleted, setIsDeleted] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  
+  // Fetch categories from database
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch('/api/categories');
+        if (response.ok) {
+          const data = await response.json();
+          setCategories(data.categories || []);
+        }
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+      }
+    };
+    fetchCategories();
+  }, []);
   
   // Fetch creator from Supabase API
   useEffect(() => {

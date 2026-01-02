@@ -222,10 +222,26 @@ function CreatorDashboard() {
     }
   };
   
-  // Available options for multi-select
-  const availableCategories = ['Beauty', 'Lifestyle', 'Fashion', 'Tech', 'Food', 'Travel', 'Fitness', 'Gaming', 'Music', 'Art'];
+  // Available options for multi-select (categories fetched from database)
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const availablePlatforms = ['Instagram', 'TikTok', 'YouTube'];
   const availableLanguages = ['Srpski', 'Engleski', 'Nemački', 'Francuski', 'Španski', 'Italijanski'];
+  
+  // Fetch categories from database
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch('/api/categories');
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableCategories(data.categories || []);
+        }
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+      }
+    };
+    fetchCategories();
+  }, []);
   
   // Use fetched reviews from Supabase
   const allReviews = reviews;

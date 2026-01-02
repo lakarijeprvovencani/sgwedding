@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useDemo } from '@/context/DemoContext';
 import Link from 'next/link';
 import Image from 'next/image';
-import { mockBusinesses, categories, Creator, CreatorStatus, Review } from '@/lib/mockData';
+import { Creator, CreatorStatus, Review } from '@/lib/mockData';
 import ReviewCard from '@/components/ReviewCard';
 import StarRating from '@/components/StarRating';
 
@@ -13,7 +13,6 @@ type AdminTab = 'pending' | 'creators' | 'businesses' | 'categories' | 'reviews'
 export default function AdminPage() {
   const { 
     currentUser, 
-    getCreators, 
     updateCreator, 
     deleteCreator, 
     isHydrated,
@@ -26,49 +25,135 @@ export default function AdminPage() {
   } = useDemo();
   const [activeTab, setActiveTab] = useState<AdminTab>('pending');
   
-  // Get all creators from context (includes modifications from localStorage)
-  // Now includes both mockCreators and pendingCreators
-  const allCreators = useMemo(() => {
-    if (!isHydrated) return [];
-    return getCreators(true); // includeHidden = true to get all creators
-  }, [getCreators, isHydrated]);
+  // State for fetched creators from Supabase
+  const [fetchedCreators, setFetchedCreators] = useState<any[]>([]);
+  const [isLoadingCreators, setIsLoadingCreators] = useState(true);
   
-  // Kreatori koji čekaju odobrenje (status='pending' ili approved=false bez statusa)
+  // State for fetched businesses from Supabase
+  const [fetchedBusinesses, setFetchedBusinesses] = useState<any[]>([]);
+  const [isLoadingBusinesses, setIsLoadingBusinesses] = useState(true);
+  
+  // Fetch creators from Supabase
+  useEffect(() => {
+    const fetchCreators = async () => {
+      try {
+        const response = await fetch('/api/admin/creators');
+        if (response.ok) {
+          const data = await response.json();
+          setFetchedCreators(data.creators || []);
+        }
+      } catch (error) {
+        console.error('Error fetching creators:', error);
+      } finally {
+        setIsLoadingCreators(false);
+      }
+    };
+    
+    fetchCreators();
+  }, []);
+  
+  // Fetch businesses from Supabase
+  useEffect(() => {
+    const fetchBusinesses = async () => {
+      try {
+        const response = await fetch('/api/admin/businesses');
+        if (response.ok) {
+          const data = await response.json();
+          setFetchedBusinesses(data.businesses || []);
+        }
+      } catch (error) {
+        console.error('Error fetching businesses:', error);
+      } finally {
+        setIsLoadingBusinesses(false);
+      }
+    };
+    
+    fetchBusinesses();
+  }, []);
+  
+  // Refresh businesses after changes
+  const refreshBusinesses = async () => {
+    try {
+      const response = await fetch('/api/admin/businesses');
+      if (response.ok) {
+        const data = await response.json();
+        setFetchedBusinesses(data.businesses || []);
+      }
+    } catch (error) {
+      console.error('Error refreshing businesses:', error);
+    }
+  };
+  
+  // Kreatori koji čekaju odobrenje
   const pendingCreatorsList = useMemo(() => {
-    return allCreators.filter(c => 
-      c.status === 'pending' || (!c.status && !c.approved)
-    );
-  }, [allCreators]);
+    return fetchedCreators.filter(c => c.status === 'pending');
+  }, [fetchedCreators]);
   
   // Odobreni/aktivni kreatori
   const approvedCreators = useMemo(() => {
-    return allCreators.filter(c => 
-      c.status === 'approved' || (c.approved && !c.status)
-    );
-  }, [allCreators]);
+    return fetchedCreators.filter(c => c.status === 'approved');
+  }, [fetchedCreators]);
   
   // Deaktivirani kreatori
   const deactivatedCreators = useMemo(() => {
-    return allCreators.filter(c => c.status === 'deactivated');
-  }, [allCreators]);
+    return fetchedCreators.filter(c => c.status === 'deactivated');
+  }, [fetchedCreators]);
   
-  // State za biznise
-  const [localBusinesses, setLocalBusinesses] = useState([...mockBusinesses]);
+  // Odbijeni kreatori
+  const rejectedCreators = useMemo(() => {
+    return fetchedCreators.filter(c => c.status === 'rejected');
+  }, [fetchedCreators]);
   
-  // State za kategorije
-  const [localCategories, setLocalCategories] = useState([...categories]);
+  // State za biznise - sada se koristi fetchedBusinesses
+  
+  // State za kategorije - sada se koristi fetchedCategories
+  const [fetchedCategories, setFetchedCategories] = useState<string[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [newCategory, setNewCategory] = useState('');
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  
+  // Fetch categories from Supabase
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch('/api/admin/categories');
+        if (response.ok) {
+          const data = await response.json();
+          setFetchedCategories(data.categories || []);
+        }
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+      } finally {
+        setIsLoadingCategories(false);
+      }
+    };
+    
+    fetchCategories();
+  }, []);
+  
+  // Refresh categories after changes
+  const refreshCategories = async () => {
+    try {
+      const response = await fetch('/api/admin/categories');
+      if (response.ok) {
+        const data = await response.json();
+        setFetchedCategories(data.categories || []);
+      }
+    } catch (error) {
+      console.error('Error refreshing categories:', error);
+    }
+  };
   
   // State za editovanje
-  const [editingCreator, setEditingCreator] = useState<Creator | null>(null);
+  const [editingCreator, setEditingCreator] = useState<any | null>(null);
   
   // State za pregled kreatora (detalji)
-  const [viewingCreator, setViewingCreator] = useState<Creator | null>(null);
+  const [viewingCreator, setViewingCreator] = useState<any | null>(null);
   // Da li se modal otvara iz pending liste (prikaži Odobri/Odbij) ili iz kreatori liste (prikaži samo status)
   const [viewingFromPending, setViewingFromPending] = useState(false);
   
   // State za odbijanje kreatora (sa razlogom)
-  const [rejectingCreator, setRejectingCreator] = useState<Creator | null>(null);
+  const [rejectingCreator, setRejectingCreator] = useState<any | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   
   // Pretraga
@@ -85,14 +170,22 @@ export default function AdminPage() {
   const [deletingCategory, setDeletingCategory] = useState<string | null>(null);
   
   // State za brisanje kreatora
-  const [deletingCreator, setDeletingCreator] = useState<Creator | null>(null);
+  const [deletingCreator, setDeletingCreator] = useState<any | null>(null);
   
   // State za brisanje biznisa
-  const [deletingBusiness, setDeletingBusiness] = useState<typeof mockBusinesses[0] | null>(null);
+  const [deletingBusiness, setDeletingBusiness] = useState<any | null>(null);
   
   // State za pregled i uređivanje biznisa
-  const [viewingBusiness, setViewingBusiness] = useState<typeof mockBusinesses[0] | null>(null);
-  const [editingBusiness, setEditingBusiness] = useState<typeof mockBusinesses[0] | null>(null);
+  const [viewingBusiness, setViewingBusiness] = useState<any | null>(null);
+  const [editingBusiness, setEditingBusiness] = useState<any | null>(null);
+  
+  // State za otkazivanje pretplate
+  const [cancellingSubscription, setCancellingSubscription] = useState<any | null>(null);
+  const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
+  
+  // State za deaktivaciju biznisa
+  const [deactivatingBusiness, setDeactivatingBusiness] = useState<any | null>(null);
+  const [isDeactivating, setIsDeactivating] = useState(false);
   
   // State za brisanje portfolio stavke iz admin edit modala
   const [deletingPortfolioIndex, setDeletingPortfolioIndex] = useState<number | null>(null);
@@ -147,84 +240,253 @@ export default function AdminPage() {
     );
   }
 
+  // Refresh creators after action
+  const refreshCreators = async () => {
+    try {
+      const response = await fetch('/api/admin/creators');
+      if (response.ok) {
+        const data = await response.json();
+        setFetchedCreators(data.creators || []);
+      }
+    } catch (error) {
+      console.error('Error refreshing creators:', error);
+    }
+  };
+
   // Odobri kreatora - sets status to 'approved'
-  const handleApprove = (id: string) => {
-    updateCreator(id, { 
-      approved: true, 
-      status: 'approved' as CreatorStatus 
-    });
+  const handleApprove = async (id: string) => {
+    try {
+      const response = await fetch('/api/admin/creators', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: id, action: 'approve' }),
+      });
+      
+      if (response.ok) {
+        await refreshCreators();
+      } else {
+        alert('Greška pri odobravanju kreatora');
+      }
+    } catch (error) {
+      console.error('Error approving creator:', error);
+      alert('Greška pri odobravanju kreatora');
+    }
   };
 
   // Odbij kreatora sa razlogom
-  const handleReject = (id: string, reason: string) => {
-    updateCreator(id, { 
-      approved: false, 
-      status: 'rejected' as CreatorStatus,
-      rejectionReason: reason
-    });
-    setRejectingCreator(null);
-    setRejectionReason('');
+  const handleReject = async (id: string, reason: string) => {
+    try {
+      const response = await fetch('/api/admin/creators', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: id, action: 'reject', rejectionReason: reason }),
+      });
+      
+      if (response.ok) {
+        await refreshCreators();
+        setRejectingCreator(null);
+        setRejectionReason('');
+      } else {
+        alert('Greška pri odbijanju kreatora');
+      }
+    } catch (error) {
+      console.error('Error rejecting creator:', error);
+      alert('Greška pri odbijanju kreatora');
+    }
   };
   
   // Otvori modal za odbijanje
-  const openRejectModal = (creator: Creator) => {
+  const openRejectModal = (creator: any) => {
     setRejectingCreator(creator);
     setRejectionReason('');
   };
 
   // Obriši kreatora
-  const handleDeleteCreator = (creator: Creator) => {
+  const handleDeleteCreator = (creator: any) => {
     setDeletingCreator(creator);
   };
   
-  const confirmDeleteCreator = () => {
+  const confirmDeleteCreator = async () => {
     if (deletingCreator) {
-      deleteCreator(deletingCreator.id);
-      setDeletingCreator(null);
+      try {
+        const response = await fetch(`/api/admin/creators?creatorId=${deletingCreator.id}`, {
+          method: 'DELETE',
+        });
+        
+        if (response.ok) {
+          await refreshCreators();
+          setDeletingCreator(null);
+        } else {
+          alert('Greška pri brisanju kreatora');
+        }
+      } catch (error) {
+        console.error('Error deleting creator:', error);
+        alert('Greška pri brisanju kreatora');
+      }
     }
   };
 
   // Promeni status kreatora
-  const handleChangeStatus = (id: string, newStatus: CreatorStatus) => {
-    updateCreator(id, { 
-      status: newStatus,
-      approved: newStatus === 'approved'
-    });
+  const handleChangeStatus = async (id: string, newStatus: CreatorStatus) => {
+    const action = newStatus === 'approved' ? 'approve' : 
+                   newStatus === 'deactivated' ? 'deactivate' : 
+                   newStatus === 'rejected' ? 'reject' : 'reactivate';
+    
+    try {
+      const response = await fetch('/api/admin/creators', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: id, action }),
+      });
+      
+      if (response.ok) {
+        await refreshCreators();
+      }
+    } catch (error) {
+      console.error('Error changing status:', error);
+    }
   };
 
   // Obriši biznis
-  const handleDeleteBusiness = (business: typeof mockBusinesses[0]) => {
+  const handleDeleteBusiness = (business: any) => {
     setDeletingBusiness(business);
   };
   
-  const confirmDeleteBusiness = () => {
+  const confirmDeleteBusiness = async () => {
     if (deletingBusiness) {
-      setLocalBusinesses(prev => prev.filter(b => b.id !== deletingBusiness.id));
-      setDeletingBusiness(null);
+      try {
+        const response = await fetch(`/api/admin/businesses?businessId=${deletingBusiness.id}`, {
+          method: 'DELETE',
+        });
+        
+        if (response.ok) {
+          await refreshBusinesses();
+          setDeletingBusiness(null);
+        } else {
+          alert('Greška pri brisanju biznisa');
+        }
+      } catch (error) {
+        console.error('Error deleting business:', error);
+        alert('Greška pri brisanju biznisa');
+      }
     }
   };
 
   // Promeni status biznisa
-  const handleChangeBusinessStatus = (id: string, newStatus: 'active' | 'expired' | 'none') => {
-    setLocalBusinesses(prev => prev.map(b => 
-      b.id === id ? { ...b, subscriptionStatus: newStatus } : b
-    ));
+  const handleChangeBusinessStatus = async (id: string, newStatus: 'active' | 'expired' | 'none') => {
+    try {
+      const response = await fetch('/api/admin/businesses', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId: id,
+          subscriptionStatus: newStatus,
+        }),
+      });
+      
+      if (response.ok) {
+        await refreshBusinesses();
+      } else {
+        alert('Greška pri promeni statusa');
+      }
+    } catch (error) {
+      console.error('Error changing status:', error);
+      alert('Greška pri promeni statusa');
+    }
+  };
+  
+  // Otkaži pretplatu biznisa
+  const confirmCancelSubscription = async () => {
+    if (!cancellingSubscription) return;
+    
+    setIsCancellingSubscription(true);
+    try {
+      const response = await fetch('/api/admin/businesses', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId: cancellingSubscription.id,
+          action: 'cancel_subscription',
+        }),
+      });
+      
+      if (response.ok) {
+        await refreshBusinesses();
+        // Ažuriraj editingBusiness ako je isti
+        if (editingBusiness?.id === cancellingSubscription.id) {
+          setEditingBusiness({...editingBusiness, subscriptionStatus: 'expired', stripeSubscriptionId: null});
+        }
+        setCancellingSubscription(null);
+      } else {
+        setCancellingSubscription(null);
+      }
+    } catch (error) {
+      console.error('Error cancelling subscription:', error);
+      setCancellingSubscription(null);
+    } finally {
+      setIsCancellingSubscription(false);
+      alert('Greška pri otkazivanju pretplate');
+    }
   };
 
   // Sačuvaj izmene biznisa
-  const handleSaveBusiness = (updatedBusiness: typeof mockBusinesses[0]) => {
-    setLocalBusinesses(prev => prev.map(b => 
-      b.id === updatedBusiness.id ? updatedBusiness : b
-    ));
-    setEditingBusiness(null);
+  const handleSaveBusiness = async (updatedBusiness: any) => {
+    try {
+      const response = await fetch('/api/admin/businesses', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId: updatedBusiness.id,
+          companyName: updatedBusiness.companyName,
+          email: updatedBusiness.email,
+          phone: updatedBusiness.phone,
+          website: updatedBusiness.website,
+          industry: updatedBusiness.industry,
+          description: updatedBusiness.description,
+          subscriptionStatus: updatedBusiness.subscriptionStatus,
+          subscriptionType: updatedBusiness.subscriptionType,
+          subscribedAt: updatedBusiness.subscribedAt,
+          expiresAt: updatedBusiness.expiresAt,
+        }),
+      });
+      
+      if (response.ok) {
+        await refreshBusinesses();
+        setEditingBusiness(null);
+      } else {
+        alert('Greška pri čuvanju izmena');
+      }
+    } catch (error) {
+      console.error('Error saving business:', error);
+      alert('Greška pri čuvanju izmena');
+    }
   };
 
   // Dodaj kategoriju
-  const handleAddCategory = (e: React.FormEvent) => {
+  const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newCategory.trim() && !localCategories.includes(newCategory.trim())) {
-      setLocalCategories([...localCategories, newCategory.trim()]);
-      setNewCategory('');
+    if (!newCategory.trim() || fetchedCategories.includes(newCategory.trim())) return;
+    
+    setIsAddingCategory(true);
+    try {
+      const response = await fetch('/api/admin/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newCategory.trim() }),
+      });
+      
+      if (response.ok) {
+        await refreshCategories();
+        setNewCategory('');
+      } else {
+        const data = await response.json();
+        alert(data.error || 'Greška pri dodavanju kategorije');
+      }
+    } catch (error) {
+      console.error('Error adding category:', error);
+      alert('Greška pri dodavanju kategorije');
+    } finally {
+      setIsAddingCategory(false);
     }
   };
 
@@ -233,47 +495,74 @@ export default function AdminPage() {
     setDeletingCategory(category);
   };
   
-  const confirmDeleteCategory = () => {
-    if (deletingCategory) {
-      setLocalCategories(prev => prev.filter(c => c !== deletingCategory));
-      setDeletingCategory(null);
+  const confirmDeleteCategory = async () => {
+    if (!deletingCategory) return;
+    
+    try {
+      const response = await fetch(`/api/admin/categories?name=${encodeURIComponent(deletingCategory)}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        await refreshCategories();
+        setDeletingCategory(null);
+      } else {
+        alert('Greška pri brisanju kategorije');
+      }
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      alert('Greška pri brisanju kategorije');
     }
   };
 
   // Sačuvaj izmene kreatora
-  const handleSaveCreator = (updatedCreator: Creator) => {
-    updateCreator(updatedCreator.id, {
-      name: updatedCreator.name,
-      email: updatedCreator.email,
-      location: updatedCreator.location,
-      bio: updatedCreator.bio,
-      priceFrom: updatedCreator.priceFrom,
-      phone: updatedCreator.phone,
-      instagram: updatedCreator.instagram,
-      tiktok: updatedCreator.tiktok,
-      youtube: updatedCreator.youtube,
-      portfolio: updatedCreator.portfolio,
-    });
-    setEditingCreator(null);
+  const handleSaveCreator = async (updatedCreator: Creator) => {
+    try {
+      const response = await fetch(`/api/creators/${updatedCreator.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: updatedCreator.name,
+          location: updatedCreator.location,
+          bio: updatedCreator.bio,
+          price_from: updatedCreator.priceFrom,
+          phone: updatedCreator.phone,
+          instagram: updatedCreator.instagram,
+          tiktok: updatedCreator.tiktok,
+          youtube: updatedCreator.youtube,
+          portfolio: updatedCreator.portfolio,
+        }),
+      });
+      
+      if (response.ok) {
+        await refreshCreators();
+        setEditingCreator(null);
+      } else {
+        alert('Greška pri čuvanju izmena');
+      }
+    } catch (error) {
+      console.error('Error saving creator:', error);
+      alert('Greška pri čuvanju izmena');
+    }
   };
 
   // Filtrirani kreatori (svi osim obrišenih)
-  const filteredCreators = allCreators.filter(c => 
+  const filteredCreators = fetchedCreators.filter(c => 
     c.name.toLowerCase().includes(searchCreators.toLowerCase()) ||
     c.email.toLowerCase().includes(searchCreators.toLowerCase())
   );
 
   // Filtrirani biznisi
-  const filteredBusinesses = localBusinesses.filter(b => 
-    b.companyName.toLowerCase().includes(searchBusinesses.toLowerCase()) ||
-    b.email.toLowerCase().includes(searchBusinesses.toLowerCase())
+  const filteredBusinesses = fetchedBusinesses.filter(b => 
+    (b.companyName || '').toLowerCase().includes(searchBusinesses.toLowerCase()) ||
+    (b.email || '').toLowerCase().includes(searchBusinesses.toLowerCase())
   );
 
   const tabs: { id: AdminTab; label: string; count?: number; highlight?: boolean }[] = [
     { id: 'pending', label: 'Čekaju odobrenje', count: pendingCreatorsList.length },
-    { id: 'creators', label: 'Kreatori', count: allCreators.length },
-    { id: 'businesses', label: 'Biznisi', count: localBusinesses.length },
-    { id: 'categories', label: 'Kategorije', count: localCategories.length },
+    { id: 'creators', label: 'Kreatori', count: fetchedCreators.length },
+    { id: 'businesses', label: 'Biznisi', count: fetchedBusinesses.length },
+    { id: 'categories', label: 'Kategorije', count: fetchedCategories.length },
     { id: 'reviews', label: 'Recenzije', count: pendingReviewsCount, highlight: pendingReviewsCount > 0 },
   ];
 
@@ -362,7 +651,12 @@ export default function AdminPage() {
             <div>
               <h2 className="text-base sm:text-lg font-medium mb-4 sm:mb-6">Kreatori koji čekaju odobrenje</h2>
               
-              {pendingCreatorsList.length === 0 ? (
+              {isLoadingCreators ? (
+                <div className="text-center py-8 sm:py-12">
+                  <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-muted text-sm sm:text-base">Učitavanje kreatora...</p>
+                </div>
+              ) : pendingCreatorsList.length === 0 ? (
                 <div className="text-center py-8 sm:py-12">
                   <div className="text-3xl sm:text-4xl mb-4">✅</div>
                   <p className="text-muted text-sm sm:text-base">Nema kreatora koji čekaju odobrenje</p>
@@ -701,7 +995,11 @@ export default function AdminPage() {
                 />
               </div>
               
-              {filteredBusinesses.length === 0 ? (
+              {isLoadingBusinesses ? (
+                <div className="flex justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : filteredBusinesses.length === 0 ? (
                 <div className="text-center py-8 sm:py-12">
                   <p className="text-muted text-sm sm:text-base">Nema rezultata</p>
                 </div>
@@ -861,7 +1159,7 @@ export default function AdminPage() {
           {activeTab === 'categories' && (
             <div>
               <div className="flex items-center justify-between mb-4 sm:mb-6">
-                <h2 className="text-base sm:text-lg font-medium">Kategorije ({localCategories.length})</h2>
+                <h2 className="text-base sm:text-lg font-medium">Kategorije ({fetchedCategories.length})</h2>
               </div>
               
               <form onSubmit={handleAddCategory} className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6 sm:mb-8">
@@ -871,31 +1169,50 @@ export default function AdminPage() {
                   onChange={(e) => setNewCategory(e.target.value)}
                   placeholder="Nova kategorija..."
                   className="flex-1 px-4 sm:px-5 py-2.5 sm:py-3 border border-border rounded-xl focus:outline-none focus:border-muted text-sm"
+                  disabled={isAddingCategory}
                 />
                 <button
                   type="submit"
-                  className="px-6 py-2.5 sm:py-3 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary/90 transition-colors"
+                  disabled={isAddingCategory || !newCategory.trim()}
+                  className="px-6 py-2.5 sm:py-3 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  Dodaj
+                  {isAddingCategory ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Dodajem...
+                    </>
+                  ) : (
+                    'Dodaj'
+                  )}
                 </button>
               </form>
               
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
-                {localCategories.map((category) => (
-                  <div 
-                    key={category}
-                    className="flex items-center justify-between p-3 sm:p-4 bg-secondary rounded-xl group"
-                  >
-                    <span className="text-sm truncate">{category}</span>
-                    <button 
-                      onClick={() => handleDeleteCategory(category)}
-                      className="text-muted hover:text-error transition-colors sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0 ml-2"
+              {isLoadingCategories ? (
+                <div className="flex justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : fetchedCategories.length === 0 ? (
+                <div className="text-center py-8 sm:py-12">
+                  <p className="text-muted text-sm sm:text-base">Nema kategorija</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
+                  {fetchedCategories.map((category) => (
+                    <div 
+                      key={category}
+                      className="flex items-center justify-between p-3 sm:p-4 bg-secondary rounded-xl group"
                     >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
+                      <span className="text-sm truncate">{category}</span>
+                      <button 
+                        onClick={() => handleDeleteCategory(category)}
+                        className="text-muted hover:text-error transition-colors sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0 ml-2"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -933,7 +1250,7 @@ export default function AdminPage() {
                     className="px-4 py-2 border border-border rounded-xl focus:outline-none focus:border-muted text-sm"
                   >
                     <option value="all">Svi kreatori</option>
-                    {allCreators.map(creator => (
+                    {fetchedCreators.map(creator => (
                       <option key={creator.id} value={creator.id}>
                         {creator.name}
                       </option>
@@ -1492,10 +1809,21 @@ export default function AdminPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        // TODO: API call to send password reset email
-                        // POST /api/admin/reset-password { userId: editingCreator.id, userType: 'creator' }
-                        alert(`Demo: Link za reset lozinke će biti poslat na ${editingCreator.email}`);
+                      onClick={async () => {
+                        try {
+                          const response = await fetch('/api/admin/reset-password', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email: editingCreator.email }),
+                          });
+                          if (response.ok) {
+                            alert(`Link za reset lozinke je poslat na ${editingCreator.email}`);
+                          } else {
+                            alert('Greška pri slanju reset linka');
+                          }
+                        } catch (error) {
+                          alert('Greška pri slanju reset linka');
+                        }
                       }}
                       className="px-4 py-2 text-sm border border-amber-500 text-amber-600 rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-2"
                     >
@@ -1756,6 +2084,150 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* Modal za otkazivanje pretplate */}
+        {cancellingSubscription && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+            onClick={() => !isCancellingSubscription && setCancellingSubscription(null)}
+          >
+            <div 
+              className="bg-white rounded-xl max-w-sm w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                {/* Warning Icon */}
+                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-lg font-semibold mb-2">Otkaži pretplatu?</h3>
+                <p className="text-muted text-sm mb-2">
+                  Da li ste sigurni da želite da otkažete pretplatu za biznis:
+                </p>
+                <p className="font-medium text-foreground mb-4">
+                  "{cancellingSubscription.companyName}"
+                </p>
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg p-3 mb-6">
+                  Ovo će odmah otkazati Stripe pretplatu. Biznis više neće imati pristup premium funkcijama.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setCancellingSubscription(null)}
+                    disabled={isCancellingSubscription}
+                    className="flex-1 py-2.5 border border-border rounded-lg font-medium hover:bg-secondary transition-colors disabled:opacity-50"
+                  >
+                    Odustani
+                  </button>
+                  <button
+                    onClick={confirmCancelSubscription}
+                    disabled={isCancellingSubscription}
+                    className="flex-1 py-2.5 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isCancellingSubscription ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Otkazujem...
+                      </>
+                    ) : (
+                      'Otkaži pretplatu'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za deaktivaciju biznisa */}
+        {deactivatingBusiness && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+            onClick={() => !isDeactivating && setDeactivatingBusiness(null)}
+          >
+            <div 
+              className="bg-white rounded-xl max-w-md w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                {/* Warning Icon */}
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-lg font-semibold mb-2">Deaktiviraj nalog?</h3>
+                <p className="text-muted text-sm mb-4">
+                  Želite da deaktivirate biznis:
+                </p>
+                <p className="font-medium text-foreground mb-4">
+                  "{deactivatingBusiness.companyName}"
+                </p>
+                
+                {/* Važno upozorenje */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-left">
+                  <p className="text-sm font-medium text-amber-800 mb-2">⚠️ Važno:</p>
+                  <ul className="text-xs text-amber-700 space-y-1">
+                    <li>• Korisnik <strong>neće moći da se uloguje</strong> na platformu</li>
+                    <li>• Stripe pretplata <strong>ostaje aktivna</strong> - naplata se nastavlja!</li>
+                    <li>• Ako želite da zaustavite naplatu, morate <strong>posebno otkazati pretplatu</strong></li>
+                  </ul>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeactivatingBusiness(null)}
+                    disabled={isDeactivating}
+                    className="flex-1 py-2.5 border border-border rounded-lg font-medium hover:bg-secondary transition-colors disabled:opacity-50"
+                  >
+                    Odustani
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setIsDeactivating(true);
+                      try {
+                        const response = await fetch('/api/admin/businesses', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            businessId: deactivatingBusiness.id,
+                            subscriptionStatus: 'deactivated',
+                          }),
+                        });
+                        if (response.ok) {
+                          await refreshBusinesses();
+                          if (editingBusiness?.id === deactivatingBusiness.id) {
+                            setEditingBusiness({...editingBusiness, subscriptionStatus: 'deactivated'});
+                          }
+                          setDeactivatingBusiness(null);
+                        }
+                      } catch (error) {
+                        console.error('Error deactivating:', error);
+                      } finally {
+                        setIsDeactivating(false);
+                      }
+                    }}
+                    disabled={isDeactivating}
+                    className="flex-1 py-2.5 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isDeactivating ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Deaktiviram...
+                      </>
+                    ) : (
+                      'Deaktiviraj'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Modal za pregled biznisa */}
         {viewingBusiness && (
           <div 
@@ -1906,14 +2378,26 @@ export default function AdminPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm text-muted mb-2">Email</label>
-                  <input
-                    type="email"
-                    value={editingBusiness.email}
-                    onChange={(e) => setEditingBusiness({...editingBusiness, email: e.target.value})}
-                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-muted mb-2">Email</label>
+                    <input
+                      type="email"
+                      value={editingBusiness.email}
+                      onChange={(e) => setEditingBusiness({...editingBusiness, email: e.target.value})}
+                      className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted mb-2">Telefon</label>
+                    <input
+                      type="text"
+                      value={editingBusiness.phone || ''}
+                      onChange={(e) => setEditingBusiness({...editingBusiness, phone: e.target.value})}
+                      className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                      placeholder="+381..."
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -1951,55 +2435,85 @@ export default function AdminPage() {
                 </div>
 
                 <div className="pt-4 mt-2 border-t border-border">
-                  <p className="text-xs text-muted uppercase tracking-wider mb-3">Pretplata</p>
+                  <p className="text-xs text-muted uppercase tracking-wider mb-3">Pretplata i pristup</p>
                   
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm text-muted mb-2">Status</label>
-                      <select
-                        value={editingBusiness.subscriptionStatus}
-                        onChange={(e) => setEditingBusiness({...editingBusiness, subscriptionStatus: e.target.value as 'active' | 'expired' | 'none'})}
-                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
-                      >
-                        <option value="active">Aktivan</option>
-                        <option value="expired">Istekao</option>
-                        <option value="none">Neaktivan</option>
-                      </select>
+                  {/* Status prikaz i akcija */}
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm text-muted">Status naloga</label>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                        editingBusiness.subscriptionStatus === 'deactivated' 
+                          ? 'bg-red-100 text-red-700' 
+                          : 'bg-green-100 text-green-700'
+                      }`}>
+                        {editingBusiness.subscriptionStatus === 'deactivated' ? 'Deaktiviran' : 'Aktivan'}
+                      </span>
                     </div>
-                    <div>
-                      <label className="block text-sm text-muted mb-2">Tip</label>
-                      <select
-                        value={editingBusiness.subscriptionType || ''}
-                        onChange={(e) => setEditingBusiness({...editingBusiness, subscriptionType: e.target.value === '' ? null : e.target.value as 'monthly' | 'yearly'})}
-                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                    {editingBusiness.subscriptionStatus === 'deactivated' ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingBusiness({...editingBusiness, subscriptionStatus: 'active'})}
+                        className="w-full py-3 border border-green-500 text-green-600 rounded-xl hover:bg-green-50 transition-colors text-sm font-medium"
                       >
-                        <option value="">Nije odabrano</option>
-                        <option value="monthly">Mesečni</option>
-                        <option value="yearly">Godišnji</option>
-                      </select>
-                    </div>
+                        Aktiviraj nalog
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDeactivatingBusiness(editingBusiness)}
+                        className="w-full py-3 border border-red-300 text-red-600 rounded-xl hover:bg-red-50 transition-colors text-sm font-medium"
+                      >
+                        Deaktiviraj nalog
+                      </button>
+                    )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                  {/* Info polja - samo za čitanje */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-secondary/50 rounded-xl p-4">
                     <div>
-                      <label className="block text-sm text-muted mb-2">Datum pretplate</label>
-                      <input
-                        type="date"
-                        value={editingBusiness.subscribedAt || ''}
-                        onChange={(e) => setEditingBusiness({...editingBusiness, subscribedAt: e.target.value})}
-                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
-                      />
+                      <p className="text-xs text-muted mb-1">Tip pretplate</p>
+                      <p className="font-medium">
+                        {editingBusiness.subscriptionType === 'yearly' ? 'Godišnji' : 
+                         editingBusiness.subscriptionType === 'monthly' ? 'Mesečni' : 
+                         'Nije aktivna'}
+                      </p>
                     </div>
                     <div>
-                      <label className="block text-sm text-muted mb-2">Datum isteka</label>
-                      <input
-                        type="date"
-                        value={editingBusiness.expiresAt || ''}
-                        onChange={(e) => setEditingBusiness({...editingBusiness, expiresAt: e.target.value})}
-                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
-                      />
+                      <p className="text-xs text-muted mb-1">Datum početka</p>
+                      <p className="font-medium">
+                        {editingBusiness.subscribedAt 
+                          ? new Date(editingBusiness.subscribedAt).toLocaleDateString('sr-RS')
+                          : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted mb-1">Datum isteka</p>
+                      <p className="font-medium">
+                        {editingBusiness.expiresAt 
+                          ? new Date(editingBusiness.expiresAt).toLocaleDateString('sr-RS')
+                          : '—'}
+                      </p>
                     </div>
                   </div>
+                  
+                  {/* Cancel Subscription Button - uvek vidljivo dok postoji Stripe pretplata */}
+                  {editingBusiness.stripeSubscriptionId && (
+                    <div className="mt-4 pt-4 border-t border-amber-200 bg-amber-50 -mx-6 px-6 py-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-amber-800">Otkaži Stripe pretplatu</p>
+                          <p className="text-xs text-amber-600">Ovo će odmah otkazati automatsku naplatu</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCancellingSubscription(editingBusiness)}
+                          className="px-4 py-2 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+                        >
+                          Otkaži pretplatu
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Reset Password Section */}
@@ -2011,10 +2525,21 @@ export default function AdminPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        // TODO: API call to send password reset email
-                        // POST /api/admin/reset-password { userId: editingBusiness.id, userType: 'business' }
-                        alert(`Demo: Link za reset lozinke će biti poslat na ${editingBusiness.email}`);
+                      onClick={async () => {
+                        try {
+                          const response = await fetch('/api/admin/reset-password', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email: editingBusiness.email }),
+                          });
+                          if (response.ok) {
+                            alert(`Link za reset lozinke je poslat na ${editingBusiness.email}`);
+                          } else {
+                            alert('Greška pri slanju reset linka');
+                          }
+                        } catch (error) {
+                          alert('Greška pri slanju reset linka');
+                        }
                       }}
                       className="px-4 py-2 text-sm border border-amber-500 text-amber-600 rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-2"
                     >
