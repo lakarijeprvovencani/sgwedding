@@ -1,0 +1,2051 @@
+'use client';
+
+import { useState, useMemo } from 'react';
+import { useDemo } from '@/context/DemoContext';
+import Link from 'next/link';
+import Image from 'next/image';
+import { mockBusinesses, categories, Creator, CreatorStatus, Review } from '@/lib/mockData';
+import ReviewCard from '@/components/ReviewCard';
+import StarRating from '@/components/StarRating';
+
+type AdminTab = 'pending' | 'creators' | 'businesses' | 'categories' | 'reviews';
+
+export default function AdminPage() {
+  const { 
+    currentUser, 
+    getCreators, 
+    updateCreator, 
+    deleteCreator, 
+    isHydrated,
+    getAllReviews,
+    getPendingReviews,
+    getCreatorById,
+    approveReview,
+    rejectReview,
+    deleteReview,
+  } = useDemo();
+  const [activeTab, setActiveTab] = useState<AdminTab>('pending');
+  
+  // Get all creators from context (includes modifications from localStorage)
+  // Now includes both mockCreators and pendingCreators
+  const allCreators = useMemo(() => {
+    if (!isHydrated) return [];
+    return getCreators(true); // includeHidden = true to get all creators
+  }, [getCreators, isHydrated]);
+  
+  // Kreatori koji čekaju odobrenje (status='pending' ili approved=false bez statusa)
+  const pendingCreatorsList = useMemo(() => {
+    return allCreators.filter(c => 
+      c.status === 'pending' || (!c.status && !c.approved)
+    );
+  }, [allCreators]);
+  
+  // Odobreni/aktivni kreatori
+  const approvedCreators = useMemo(() => {
+    return allCreators.filter(c => 
+      c.status === 'approved' || (c.approved && !c.status)
+    );
+  }, [allCreators]);
+  
+  // Deaktivirani kreatori
+  const deactivatedCreators = useMemo(() => {
+    return allCreators.filter(c => c.status === 'deactivated');
+  }, [allCreators]);
+  
+  // State za biznise
+  const [localBusinesses, setLocalBusinesses] = useState([...mockBusinesses]);
+  
+  // State za kategorije
+  const [localCategories, setLocalCategories] = useState([...categories]);
+  const [newCategory, setNewCategory] = useState('');
+  
+  // State za editovanje
+  const [editingCreator, setEditingCreator] = useState<Creator | null>(null);
+  
+  // State za pregled kreatora (detalji)
+  const [viewingCreator, setViewingCreator] = useState<Creator | null>(null);
+  // Da li se modal otvara iz pending liste (prikaži Odobri/Odbij) ili iz kreatori liste (prikaži samo status)
+  const [viewingFromPending, setViewingFromPending] = useState(false);
+  
+  // State za odbijanje kreatora (sa razlogom)
+  const [rejectingCreator, setRejectingCreator] = useState<Creator | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  
+  // Pretraga
+  const [searchCreators, setSearchCreators] = useState('');
+  const [searchBusinesses, setSearchBusinesses] = useState('');
+  
+  // State za recenzije
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [selectedReviewCreator, setSelectedReviewCreator] = useState<string>('all');
+  const [rejectingReview, setRejectingReview] = useState<Review | null>(null);
+  const [reviewRejectionReason, setReviewRejectionReason] = useState('');
+  
+  // State za brisanje kategorije
+  const [deletingCategory, setDeletingCategory] = useState<string | null>(null);
+  
+  // State za brisanje kreatora
+  const [deletingCreator, setDeletingCreator] = useState<Creator | null>(null);
+  
+  // State za brisanje biznisa
+  const [deletingBusiness, setDeletingBusiness] = useState<typeof mockBusinesses[0] | null>(null);
+  
+  // State za pregled i uređivanje biznisa
+  const [viewingBusiness, setViewingBusiness] = useState<typeof mockBusinesses[0] | null>(null);
+  const [editingBusiness, setEditingBusiness] = useState<typeof mockBusinesses[0] | null>(null);
+  
+  // State za brisanje portfolio stavke iz admin edit modala
+  const [deletingPortfolioIndex, setDeletingPortfolioIndex] = useState<number | null>(null);
+  
+  // Get reviews
+  const allReviews = useMemo(() => {
+    if (!isHydrated) return [];
+    return getAllReviews();
+  }, [getAllReviews, isHydrated]);
+  
+  const pendingReviewsCount = useMemo(() => {
+    return allReviews.filter(r => r.status === 'pending').length;
+  }, [allReviews]);
+  
+  // Filtrirane recenzije
+  const filteredReviews = useMemo(() => {
+    let reviews = [...allReviews];
+    
+    if (reviewStatusFilter !== 'all') {
+      reviews = reviews.filter(r => r.status === reviewStatusFilter);
+    }
+    
+    if (selectedReviewCreator !== 'all') {
+      reviews = reviews.filter(r => r.creatorId === selectedReviewCreator);
+    }
+    
+    // Sort by date, pending first
+    return reviews.sort((a, b) => {
+      if (a.status === 'pending' && b.status !== 'pending') return -1;
+      if (a.status !== 'pending' && b.status === 'pending') return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [allReviews, reviewStatusFilter, selectedReviewCreator]);
+  
+  // Helper za dobijanje imena kreatora
+  const getCreatorName = (creatorId: string): string => {
+    const creator = getCreatorById(creatorId);
+    return creator?.name || 'Nepoznat kreator';
+  };
+
+  if (currentUser.type !== 'admin') {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-medium mb-4">Pristup odbijen</h1>
+          <p className="text-muted mb-6">Samo administratori mogu pristupiti ovoj stranici.</p>
+          <Link href="/" className="text-primary hover:underline">
+            Nazad na početnu
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Odobri kreatora - sets status to 'approved'
+  const handleApprove = (id: string) => {
+    updateCreator(id, { 
+      approved: true, 
+      status: 'approved' as CreatorStatus 
+    });
+  };
+
+  // Odbij kreatora sa razlogom
+  const handleReject = (id: string, reason: string) => {
+    updateCreator(id, { 
+      approved: false, 
+      status: 'rejected' as CreatorStatus,
+      rejectionReason: reason
+    });
+    setRejectingCreator(null);
+    setRejectionReason('');
+  };
+  
+  // Otvori modal za odbijanje
+  const openRejectModal = (creator: Creator) => {
+    setRejectingCreator(creator);
+    setRejectionReason('');
+  };
+
+  // Obriši kreatora
+  const handleDeleteCreator = (creator: Creator) => {
+    setDeletingCreator(creator);
+  };
+  
+  const confirmDeleteCreator = () => {
+    if (deletingCreator) {
+      deleteCreator(deletingCreator.id);
+      setDeletingCreator(null);
+    }
+  };
+
+  // Promeni status kreatora
+  const handleChangeStatus = (id: string, newStatus: CreatorStatus) => {
+    updateCreator(id, { 
+      status: newStatus,
+      approved: newStatus === 'approved'
+    });
+  };
+
+  // Obriši biznis
+  const handleDeleteBusiness = (business: typeof mockBusinesses[0]) => {
+    setDeletingBusiness(business);
+  };
+  
+  const confirmDeleteBusiness = () => {
+    if (deletingBusiness) {
+      setLocalBusinesses(prev => prev.filter(b => b.id !== deletingBusiness.id));
+      setDeletingBusiness(null);
+    }
+  };
+
+  // Promeni status biznisa
+  const handleChangeBusinessStatus = (id: string, newStatus: 'active' | 'expired' | 'none') => {
+    setLocalBusinesses(prev => prev.map(b => 
+      b.id === id ? { ...b, subscriptionStatus: newStatus } : b
+    ));
+  };
+
+  // Sačuvaj izmene biznisa
+  const handleSaveBusiness = (updatedBusiness: typeof mockBusinesses[0]) => {
+    setLocalBusinesses(prev => prev.map(b => 
+      b.id === updatedBusiness.id ? updatedBusiness : b
+    ));
+    setEditingBusiness(null);
+  };
+
+  // Dodaj kategoriju
+  const handleAddCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newCategory.trim() && !localCategories.includes(newCategory.trim())) {
+      setLocalCategories([...localCategories, newCategory.trim()]);
+      setNewCategory('');
+    }
+  };
+
+  // Obriši kategoriju
+  const handleDeleteCategory = (category: string) => {
+    setDeletingCategory(category);
+  };
+  
+  const confirmDeleteCategory = () => {
+    if (deletingCategory) {
+      setLocalCategories(prev => prev.filter(c => c !== deletingCategory));
+      setDeletingCategory(null);
+    }
+  };
+
+  // Sačuvaj izmene kreatora
+  const handleSaveCreator = (updatedCreator: Creator) => {
+    updateCreator(updatedCreator.id, {
+      name: updatedCreator.name,
+      email: updatedCreator.email,
+      location: updatedCreator.location,
+      bio: updatedCreator.bio,
+      priceFrom: updatedCreator.priceFrom,
+      phone: updatedCreator.phone,
+      instagram: updatedCreator.instagram,
+      tiktok: updatedCreator.tiktok,
+      youtube: updatedCreator.youtube,
+      portfolio: updatedCreator.portfolio,
+    });
+    setEditingCreator(null);
+  };
+
+  // Filtrirani kreatori (svi osim obrišenih)
+  const filteredCreators = allCreators.filter(c => 
+    c.name.toLowerCase().includes(searchCreators.toLowerCase()) ||
+    c.email.toLowerCase().includes(searchCreators.toLowerCase())
+  );
+
+  // Filtrirani biznisi
+  const filteredBusinesses = localBusinesses.filter(b => 
+    b.companyName.toLowerCase().includes(searchBusinesses.toLowerCase()) ||
+    b.email.toLowerCase().includes(searchBusinesses.toLowerCase())
+  );
+
+  const tabs: { id: AdminTab; label: string; count?: number; highlight?: boolean }[] = [
+    { id: 'pending', label: 'Čekaju odobrenje', count: pendingCreatorsList.length },
+    { id: 'creators', label: 'Kreatori', count: allCreators.length },
+    { id: 'businesses', label: 'Biznisi', count: localBusinesses.length },
+    { id: 'categories', label: 'Kategorije', count: localCategories.length },
+    { id: 'reviews', label: 'Recenzije', count: pendingReviewsCount, highlight: pendingReviewsCount > 0 },
+  ];
+
+  return (
+    <div className="min-h-screen bg-secondary/30">
+      <div className="max-w-7xl 2xl:max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-12 py-6 sm:py-12">
+        {/* Header - responsive */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 sm:mb-10 gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-light mb-1 sm:mb-2">Admin Panel</h1>
+            <p className="text-sm sm:text-base text-muted">Upravljaj platformom</p>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-4">
+            <span className="text-xs sm:text-sm text-muted">Ulogovan kao:</span>
+            <span className="px-3 sm:px-4 py-1.5 sm:py-2 bg-primary text-white rounded-full text-xs sm:text-sm">Admin</span>
+          </div>
+        </div>
+
+        {/* Tabs - scrollable on mobile, flex on desktop */}
+        <div className="mb-6 sm:mb-8">
+          {/* Mobile tabs - horizontal scroll */}
+          <div className="flex gap-2 overflow-x-auto pb-2 sm:hidden scrollbar-hide">
+            {tabs.map((tab) => {
+              const mobileLabels: Record<AdminTab, string> = {
+                pending: 'Čekaju',
+                creators: 'Kreatori',
+                businesses: 'Biznisi',
+                categories: 'Kategorije',
+                reviews: 'Recenzije',
+              };
+              
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-2.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                    activeTab === tab.id
+                      ? 'bg-primary text-white'
+                      : 'bg-white border border-border hover:bg-secondary'
+                  } ${tab.highlight && activeTab !== tab.id ? 'border-warning' : ''}`}
+                >
+                  <span>{mobileLabels[tab.id]}</span>
+                  {tab.count !== undefined && (
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] min-w-[20px] text-center ${
+                      activeTab === tab.id ? 'bg-white/20' : 
+                      tab.highlight ? 'bg-warning text-white' : 'bg-secondary'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          
+          {/* Desktop tabs - horizontal flex */}
+          <div className="hidden sm:flex gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-6 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-primary text-white'
+                    : 'bg-white border border-border hover:bg-secondary'
+                } ${tab.highlight && activeTab !== tab.id ? 'border-warning' : ''}`}
+              >
+                {tab.label}
+                {tab.count !== undefined && (
+                  <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                    activeTab === tab.id ? 'bg-white/20' : 
+                    tab.highlight ? 'bg-warning/20 text-warning' : 'bg-secondary'
+                  }`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="bg-white rounded-2xl border border-border p-4 sm:p-6">
+          {/* Pending */}
+          {activeTab === 'pending' && (
+            <div>
+              <h2 className="text-base sm:text-lg font-medium mb-4 sm:mb-6">Kreatori koji čekaju odobrenje</h2>
+              
+              {pendingCreatorsList.length === 0 ? (
+                <div className="text-center py-8 sm:py-12">
+                  <div className="text-3xl sm:text-4xl mb-4">✅</div>
+                  <p className="text-muted text-sm sm:text-base">Nema kreatora koji čekaju odobrenje</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {pendingCreatorsList.map((creator) => (
+                    <div key={creator.id} className="border border-border rounded-xl p-4 sm:p-6">
+                      {/* Mobile layout */}
+                      <div className="sm:hidden">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-14 h-14 rounded-full overflow-hidden relative flex-shrink-0">
+                            <Image src={creator.photo} alt={creator.name} fill className="object-cover" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-medium text-base truncate">{creator.name}</h3>
+                            <p className="text-xs text-muted truncate">{creator.location}</p>
+                            <p className="text-xs text-muted truncate">{creator.email}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="font-medium text-sm">€{creator.priceFrom}</p>
+                          </div>
+                        </div>
+                        
+                        <p className="text-xs text-muted line-clamp-2 mb-3">{creator.bio}</p>
+                        
+                        <div className="flex flex-wrap gap-1.5 mb-4">
+                          {creator.categories.slice(0, 3).map((cat) => (
+                            <span key={cat} className="px-2 py-0.5 bg-secondary rounded-full text-xs">
+                              {cat}
+                            </span>
+                          ))}
+                          {creator.categories.length > 3 && (
+                            <span className="px-2 py-0.5 bg-secondary rounded-full text-xs">+{creator.categories.length - 3}</span>
+                          )}
+                        </div>
+                        
+                        {/* Mobile buttons - stack vertically */}
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={() => { setViewingCreator(creator); setViewingFromPending(true); }}
+                            className="w-full py-2.5 border border-border text-foreground rounded-xl text-sm font-medium hover:bg-secondary transition-colors"
+                          >
+                            Pogledaj detalje
+                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleApprove(creator.id)}
+                              className="flex-1 py-2.5 bg-success text-white rounded-xl text-sm font-medium hover:bg-success/90 transition-colors"
+                            >
+                              ✓ Odobri
+                            </button>
+                            <button
+                              onClick={() => openRejectModal(creator)}
+                              className="flex-1 py-2.5 bg-error text-white rounded-xl text-sm font-medium hover:bg-error/90 transition-colors"
+                            >
+                              ✕ Odbij
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Desktop layout */}
+                      <div className="hidden sm:block">
+                        <div className="flex items-start gap-6">
+                          <div className="w-20 h-20 rounded-full overflow-hidden relative flex-shrink-0">
+                            <Image src={creator.photo} alt={creator.name} fill className="object-cover" />
+                          </div>
+                          
+                          <div className="flex-1">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <h3 className="font-medium text-lg">{creator.name}</h3>
+                                <p className="text-sm text-muted">{creator.location}</p>
+                                <p className="text-sm text-muted">{creator.email}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-medium">€{creator.priceFrom}</p>
+                                <p className="text-sm text-muted">Registrovan: {creator.createdAt}</p>
+                              </div>
+                            </div>
+                            
+                            <p className="text-sm mt-4 line-clamp-2">{creator.bio}</p>
+                            
+                            <div className="flex flex-wrap gap-2 mt-4">
+                              {creator.categories.map((cat) => (
+                                <span key={cat} className="px-3 py-1 bg-secondary rounded-full text-xs">
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
+                            
+                            <div className="flex gap-3 mt-6">
+                              <button
+                                onClick={() => { setViewingCreator(creator); setViewingFromPending(true); }}
+                                className="px-6 py-2.5 border border-border text-foreground rounded-xl text-sm font-medium hover:bg-secondary transition-colors"
+                              >
+                                Pogledaj detalje
+                              </button>
+                              <button
+                                onClick={() => handleApprove(creator.id)}
+                                className="px-6 py-2.5 bg-success text-white rounded-xl text-sm font-medium hover:bg-success/90 transition-colors"
+                              >
+                                ✓ Odobri
+                              </button>
+                              <button
+                                onClick={() => openRejectModal(creator)}
+                                className="px-6 py-2.5 bg-error text-white rounded-xl text-sm font-medium hover:bg-error/90 transition-colors"
+                              >
+                                ✕ Odbij
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Creators */}
+          {activeTab === 'creators' && (
+            <div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+                <h2 className="text-base sm:text-lg font-medium">Svi kreatori ({filteredCreators.length})</h2>
+                <input
+                  type="text"
+                  placeholder="Pretraži..."
+                  value={searchCreators}
+                  onChange={(e) => setSearchCreators(e.target.value)}
+                  className="px-4 py-2 border border-border rounded-xl focus:outline-none focus:border-muted w-full sm:w-64 text-sm"
+                />
+              </div>
+              
+              {filteredCreators.length === 0 ? (
+                <div className="text-center py-8 sm:py-12">
+                  <p className="text-muted text-sm sm:text-base">Nema rezultata</p>
+                </div>
+              ) : (
+                <>
+                  {/* Mobile view - cards */}
+                  <div className="sm:hidden space-y-3">
+                    {filteredCreators.map((creator) => (
+                      <div key={creator.id} className="border border-border rounded-xl p-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-12 h-12 rounded-full overflow-hidden relative flex-shrink-0">
+                            <Image src={creator.photo} alt="" fill className="object-cover" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{creator.name}</div>
+                            <div className="text-xs text-muted truncate">{creator.email}</div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="font-medium text-sm">€{creator.priceFrom}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                          {creator.categories.slice(0, 2).map((cat) => (
+                            <span key={cat} className="px-2 py-0.5 bg-secondary rounded text-xs">
+                              {cat}
+                            </span>
+                          ))}
+                          {creator.categories.length > 2 && (
+                            <span className="px-2 py-0.5 bg-secondary rounded text-xs">
+                              +{creator.categories.length - 2}
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center justify-between gap-2">
+                          <select
+                            value={creator.status || (creator.approved ? 'approved' : 'pending')}
+                            onChange={(e) => handleChangeStatus(creator.id, e.target.value as CreatorStatus)}
+                            className={`px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-colors border-0 focus:outline-none ${
+                              (creator.status === 'approved' || (creator.approved && !creator.status))
+                                ? 'bg-black text-white' 
+                                : creator.status === 'pending'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            <option value="approved">Aktivan</option>
+                            <option value="pending">Na čekanju</option>
+                            <option value="deactivated">Neaktivan</option>
+                          </select>
+                          
+                          <div className="flex gap-3 items-center">
+                            <button 
+                              onClick={() => { setViewingCreator(creator); setViewingFromPending(false); }}
+                              className="text-muted hover:text-primary transition-colors"
+                              title="Pogledaj"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                            </button>
+                            <button 
+                              onClick={() => setEditingCreator(creator)}
+                              className="text-primary hover:text-primary/70 transition-colors"
+                              title="Uredi"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteCreator(creator)}
+                              className="text-error hover:text-error/70 transition-colors"
+                              title="Obriši"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Desktop view - table */}
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border text-left">
+                          <th className="pb-4 font-medium text-sm text-muted">Kreator</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Kategorije</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Cena</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Status</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Akcije</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCreators.map((creator) => (
+                          <tr key={creator.id} className="border-b border-border">
+                            <td className="py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full overflow-hidden relative">
+                                  <Image src={creator.photo} alt="" fill className="object-cover" />
+                                </div>
+                                <div>
+                                  <div className="font-medium">{creator.name}</div>
+                                  <div className="text-sm text-muted">{creator.email}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-4">
+                              <div className="flex gap-1 flex-wrap">
+                                {creator.categories.slice(0, 2).map((cat) => (
+                                  <span key={cat} className="px-2 py-0.5 bg-secondary rounded text-xs">
+                                    {cat}
+                                  </span>
+                                ))}
+                                {creator.categories.length > 2 && (
+                                  <span className="px-2 py-0.5 bg-secondary rounded text-xs">
+                                    +{creator.categories.length - 2}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-4">€{creator.priceFrom}</td>
+                            <td className="py-4">
+                              <select
+                                value={creator.status || (creator.approved ? 'approved' : 'pending')}
+                                onChange={(e) => handleChangeStatus(creator.id, e.target.value as CreatorStatus)}
+                                className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors border-0 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
+                                  (creator.status === 'approved' || (creator.approved && !creator.status))
+                                    ? 'bg-black text-white' 
+                                    : creator.status === 'pending'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-red-100 text-red-700'
+                                }`}
+                              >
+                                <option value="approved">Aktivan</option>
+                                <option value="pending">Na čekanju</option>
+                                <option value="deactivated">Neaktivan</option>
+                              </select>
+                            </td>
+                            <td className="py-4">
+                              <div className="flex gap-3 items-center">
+                                <button 
+                                  onClick={() => { setViewingCreator(creator); setViewingFromPending(false); }}
+                                  className="text-muted hover:text-primary transition-colors"
+                                  title="Pogledaj"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                  </svg>
+                                </button>
+                                <button 
+                                  onClick={() => setEditingCreator(creator)}
+                                  className="text-primary hover:text-primary/70 transition-colors"
+                                  title="Uredi"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                  </svg>
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteCreator(creator)}
+                                  className="text-error hover:text-error/70 transition-colors"
+                                  title="Obriši"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Businesses */}
+          {activeTab === 'businesses' && (
+            <div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+                <h2 className="text-base sm:text-lg font-medium">Svi biznisi ({filteredBusinesses.length})</h2>
+                <input
+                  type="text"
+                  placeholder="Pretraži..."
+                  value={searchBusinesses}
+                  onChange={(e) => setSearchBusinesses(e.target.value)}
+                  className="px-4 py-2 border border-border rounded-xl focus:outline-none focus:border-muted w-full sm:w-64 text-sm"
+                />
+              </div>
+              
+              {filteredBusinesses.length === 0 ? (
+                <div className="text-center py-8 sm:py-12">
+                  <p className="text-muted text-sm sm:text-base">Nema rezultata</p>
+                </div>
+              ) : (
+                <>
+                  {/* Mobile view - cards */}
+                  <div className="sm:hidden space-y-3">
+                    {filteredBusinesses.map((business) => (
+                      <div key={business.id} className="border border-border rounded-xl p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-medium text-sm truncate">{business.companyName}</h3>
+                            <p className="text-xs text-muted truncate">{business.email}</p>
+                          </div>
+                          <select
+                            value={business.subscriptionStatus}
+                            onChange={(e) => handleChangeBusinessStatus(business.id, e.target.value as 'active' | 'expired' | 'none')}
+                            className={`px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-colors border-0 focus:outline-none ml-2 ${
+                              business.subscriptionStatus === 'active' 
+                                ? 'bg-black text-white' 
+                                : business.subscriptionStatus === 'expired'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            <option value="active">Aktivan</option>
+                            <option value="expired">Istekao</option>
+                            <option value="none">Neaktivan</option>
+                          </select>
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-xs text-muted">
+                          <span>
+                            Plan: {business.subscriptionType === 'yearly' ? 'Godišnji' : 
+                                   business.subscriptionType === 'monthly' ? 'Mesečni' : '—'}
+                          </span>
+                          <span>Ističe: {business.expiresAt || '—'}</span>
+                        </div>
+                        
+                        <div className="mt-3 pt-3 border-t border-border flex justify-end gap-3">
+                          <button 
+                            onClick={() => setViewingBusiness(business)}
+                            className="text-muted hover:text-primary transition-colors"
+                            title="Pogledaj"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                          </button>
+                          <button 
+                            onClick={() => setEditingBusiness(business)}
+                            className="text-primary hover:text-primary/70 transition-colors"
+                            title="Uredi"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteBusiness(business)}
+                            className="text-error hover:text-error/70 transition-colors"
+                            title="Obriši"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Desktop view - table */}
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border text-left">
+                          <th className="pb-4 font-medium text-sm text-muted">Kompanija</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Email</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Plan</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Status</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Ističe</th>
+                          <th className="pb-4 font-medium text-sm text-muted">Akcije</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredBusinesses.map((business) => (
+                          <tr key={business.id} className="border-b border-border">
+                            <td className="py-4 font-medium">{business.companyName}</td>
+                            <td className="py-4 text-muted">{business.email}</td>
+                            <td className="py-4">
+                              {business.subscriptionType === 'yearly' ? 'Godišnji' : 
+                               business.subscriptionType === 'monthly' ? 'Mesečni' : '—'}
+                            </td>
+                            <td className="py-4">
+                              <select
+                                value={business.subscriptionStatus}
+                                onChange={(e) => handleChangeBusinessStatus(business.id, e.target.value as 'active' | 'expired' | 'none')}
+                                className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors border-0 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
+                                  business.subscriptionStatus === 'active' 
+                                    ? 'bg-black text-white' 
+                                    : business.subscriptionStatus === 'expired'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-red-100 text-red-700'
+                                }`}
+                              >
+                                <option value="active">Aktivan</option>
+                                <option value="expired">Istekao</option>
+                                <option value="none">Neaktivan</option>
+                              </select>
+                            </td>
+                            <td className="py-4 text-muted">{business.expiresAt || '—'}</td>
+                            <td className="py-4">
+                              <div className="flex gap-3 items-center">
+                                <button 
+                                  onClick={() => setViewingBusiness(business)}
+                                  className="text-muted hover:text-primary transition-colors"
+                                  title="Pogledaj"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                  </svg>
+                                </button>
+                                <button 
+                                  onClick={() => setEditingBusiness(business)}
+                                  className="text-primary hover:text-primary/70 transition-colors"
+                                  title="Uredi"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                  </svg>
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteBusiness(business)}
+                                  className="text-error hover:text-error/70 transition-colors"
+                                  title="Obriši"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Categories */}
+          {activeTab === 'categories' && (
+            <div>
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <h2 className="text-base sm:text-lg font-medium">Kategorije ({localCategories.length})</h2>
+              </div>
+              
+              <form onSubmit={handleAddCategory} className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6 sm:mb-8">
+                <input
+                  type="text"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  placeholder="Nova kategorija..."
+                  className="flex-1 px-4 sm:px-5 py-2.5 sm:py-3 border border-border rounded-xl focus:outline-none focus:border-muted text-sm"
+                />
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 sm:py-3 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary/90 transition-colors"
+                >
+                  Dodaj
+                </button>
+              </form>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
+                {localCategories.map((category) => (
+                  <div 
+                    key={category}
+                    className="flex items-center justify-between p-3 sm:p-4 bg-secondary rounded-xl group"
+                  >
+                    <span className="text-sm truncate">{category}</span>
+                    <button 
+                      onClick={() => handleDeleteCategory(category)}
+                      className="text-muted hover:text-error transition-colors sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0 ml-2"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Reviews */}
+          {activeTab === 'reviews' && (
+            <div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+                <div>
+                  <h2 className="text-base sm:text-lg font-medium">Moderacija recenzija</h2>
+                  <p className="text-sm text-muted mt-1">
+                    {pendingReviewsCount > 0 
+                      ? `${pendingReviewsCount} recenzija čeka odobrenje`
+                      : 'Sve recenzije su pregledane'
+                    }
+                  </p>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {/* Status filter */}
+                  <select
+                    value={reviewStatusFilter}
+                    onChange={(e) => setReviewStatusFilter(e.target.value as typeof reviewStatusFilter)}
+                    className="px-4 py-2 border border-border rounded-xl focus:outline-none focus:border-muted text-sm"
+                  >
+                    <option value="pending">Na čekanju ({allReviews.filter(r => r.status === 'pending').length})</option>
+                    <option value="approved">Odobrene ({allReviews.filter(r => r.status === 'approved').length})</option>
+                    <option value="rejected">Odbijene ({allReviews.filter(r => r.status === 'rejected').length})</option>
+                    <option value="all">Sve ({allReviews.length})</option>
+                  </select>
+                  
+                  {/* Creator filter */}
+                  <select
+                    value={selectedReviewCreator}
+                    onChange={(e) => setSelectedReviewCreator(e.target.value)}
+                    className="px-4 py-2 border border-border rounded-xl focus:outline-none focus:border-muted text-sm"
+                  >
+                    <option value="all">Svi kreatori</option>
+                    {allCreators.map(creator => (
+                      <option key={creator.id} value={creator.id}>
+                        {creator.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              
+              {filteredReviews.length === 0 ? (
+                <div className="text-center py-8 sm:py-12">
+                  <div className="text-3xl sm:text-4xl mb-4">
+                    {reviewStatusFilter === 'pending' ? '✅' : '📝'}
+                  </div>
+                  <p className="text-muted text-sm sm:text-base">
+                    {reviewStatusFilter === 'pending' 
+                      ? 'Nema recenzija koje čekaju odobrenje'
+                      : 'Nema recenzija sa ovim filterima'
+                    }
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredReviews.map((review) => (
+                    <div key={review.id} className="border border-border rounded-xl p-4 sm:p-6">
+                      {/* Review header */}
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-4">
+                        <div className="flex items-center gap-3">
+                          {/* Business avatar */}
+                          <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                            <span className="text-sm font-medium text-primary">
+                              {review.businessName.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="font-medium text-sm">{review.businessName}</div>
+                            <div className="text-xs text-muted">
+                              Za: <Link href={`/kreator/${review.creatorId}`} className="text-primary hover:underline">
+                                {getCreatorName(review.creatorId)}
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Status & date */}
+                        <div className="flex items-center gap-3">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                            review.status === 'pending' 
+                              ? 'bg-amber-100 text-amber-700'
+                              : review.status === 'approved'
+                              ? 'bg-success/10 text-success'
+                              : 'bg-error/10 text-error'
+                          }`}>
+                            {review.status === 'pending' ? 'Na čekanju' :
+                             review.status === 'approved' ? 'Odobrena' : 'Odbijena'}
+                          </span>
+                          <span className="text-xs text-muted">{review.createdAt}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Rating */}
+                      <div className="mb-3">
+                        <StarRating rating={review.rating} readonly size="sm" />
+                      </div>
+                      
+                      {/* Comment */}
+                      <p className="text-sm mb-4 break-words">{review.comment}</p>
+                      
+                      {/* Creator reply */}
+                      {review.creatorReply && (
+                        <div className="bg-secondary/50 rounded-xl p-4 mb-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-medium text-primary">Odgovor kreatora</span>
+                            {review.creatorReplyAt && (
+                              <span className="text-xs text-muted">{review.creatorReplyAt}</span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted">{review.creatorReply}</p>
+                        </div>
+                      )}
+                      
+                      {/* Actions */}
+                      <div className="flex flex-wrap gap-2 pt-4 border-t border-border">
+                        {review.status === 'pending' && (
+                          <>
+                            <button
+                              onClick={() => approveReview(review.id)}
+                              className="px-4 py-2 bg-success text-white rounded-lg text-sm font-medium hover:bg-success/90 transition-colors"
+                            >
+                              ✓ Odobri
+                            </button>
+                            <button
+                              onClick={() => {
+                                setRejectingReview(review);
+                                setReviewRejectionReason('');
+                              }}
+                              className="px-4 py-2 bg-error text-white rounded-lg text-sm font-medium hover:bg-error/90 transition-colors"
+                            >
+                              ✕ Odbij
+                            </button>
+                          </>
+                        )}
+                        {review.status === 'approved' && (
+                          <button
+                            onClick={() => rejectReview(review.id)}
+                            className="px-4 py-2 border border-error text-error rounded-lg text-sm font-medium hover:bg-error/10 transition-colors"
+                          >
+                            Povuci odobrenje
+                          </button>
+                        )}
+                        {review.status === 'rejected' && (
+                          <button
+                            onClick={() => approveReview(review.id)}
+                            className="px-4 py-2 border border-success text-success rounded-lg text-sm font-medium hover:bg-success/10 transition-colors"
+                          >
+                            Odobri
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            if (confirm('Da li ste sigurni da želite da obrišete ovu recenziju?')) {
+                              deleteReview(review.id);
+                            }
+                          }}
+                          className="px-4 py-2 text-muted hover:text-error text-sm transition-colors ml-auto"
+                        >
+                          Obriši
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* View Creator Details Modal */}
+        {viewingCreator && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              {/* Header */}
+              <div className="sticky top-0 bg-white border-b border-border px-4 sm:px-6 py-4 flex items-center justify-between z-10">
+                <h2 className="text-lg font-medium">Detalji kreatora</h2>
+                <button 
+                  onClick={() => setViewingCreator(null)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-muted hover:text-foreground hover:bg-secondary transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="px-4 sm:px-6 py-6">
+                {/* Profile header */}
+                <div className="flex items-start gap-4 mb-6">
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden relative flex-shrink-0 bg-secondary">
+                    <Image src={viewingCreator.photo} alt={viewingCreator.name} fill className="object-cover" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xl font-medium truncate">{viewingCreator.name}</h3>
+                    <p className="text-sm text-muted">{viewingCreator.location}</p>
+                    <p className="text-lg font-semibold text-primary mt-1">od €{viewingCreator.priceFrom}</p>
+                  </div>
+                </div>
+                
+                {/* Contact info */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 p-4 bg-secondary/50 rounded-xl">
+                  <div>
+                    <span className="text-xs text-muted block">Email</span>
+                    <span className="text-sm font-medium break-all">{viewingCreator.email}</span>
+                  </div>
+                  {viewingCreator.phone && (
+                    <div>
+                      <span className="text-xs text-muted block">Telefon</span>
+                      <span className="text-sm font-medium">{viewingCreator.phone}</span>
+                    </div>
+                  )}
+                  {viewingCreator.instagram && (
+                    <div>
+                      <span className="text-xs text-muted block">Instagram</span>
+                      <span className="text-sm font-medium">{viewingCreator.instagram}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-xs text-muted block">Registrovan</span>
+                    <span className="text-sm font-medium">{viewingCreator.createdAt}</span>
+                  </div>
+                </div>
+                
+                {/* Bio */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-muted mb-2">Bio</h3>
+                  <p className="text-sm leading-relaxed">{viewingCreator.bio}</p>
+                </div>
+                
+                {/* Categories */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-muted mb-2">Kategorije</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {viewingCreator.categories.map((cat) => (
+                      <span key={cat} className="px-3 py-1.5 bg-secondary rounded-full text-xs font-medium">
+                        {cat}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Platforms */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-muted mb-2">Platforme</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {viewingCreator.platforms.map((platform) => (
+                      <span key={platform} className="px-3 py-1.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
+                        {platform}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Languages */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-muted mb-2">Jezici</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {viewingCreator.languages.map((lang) => (
+                      <span key={lang} className="px-3 py-1.5 bg-secondary rounded-full text-xs">
+                        {lang}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Portfolio */}
+                {viewingCreator.portfolio && viewingCreator.portfolio.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-medium text-muted mb-3">Portfolio ({viewingCreator.portfolio.length} video{viewingCreator.portfolio.length > 1 ? 'a' : ''})</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {viewingCreator.portfolio.map((item, index) => (
+                        <a 
+                          key={index}
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group relative aspect-[9/16] rounded-xl overflow-hidden bg-secondary"
+                        >
+                          <Image 
+                            src={item.thumbnail} 
+                            alt={`Portfolio ${index + 1}`} 
+                            fill 
+                            className="object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <span className="text-white text-xs font-medium px-3 py-1.5 bg-black/50 rounded-full flex items-center gap-1">
+                              {item.type === 'tiktok' && '📱 TikTok'}
+                              {item.type === 'instagram' && '📸 Instagram'}
+                              {item.type === 'youtube' && '🎬 YouTube'}
+                            </span>
+                          </div>
+                          <div className="absolute top-2 right-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              item.type === 'tiktok' ? 'bg-black text-white' :
+                              item.type === 'instagram' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' :
+                              'bg-red-600 text-white'
+                            }`}>
+                              {item.type === 'tiktok' && 'TikTok'}
+                              {item.type === 'instagram' && 'IG'}
+                              {item.type === 'youtube' && 'YT'}
+                            </span>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Action buttons - different for pending vs approved creators */}
+                <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-border">
+                  {viewingFromPending ? (
+                    // Pending kreatori - prikaži Odobri/Odbij
+                    <>
+                      <button
+                        onClick={() => {
+                          handleApprove(viewingCreator.id);
+                          setViewingCreator(null);
+                        }}
+                        className="flex-1 py-3 bg-success text-white rounded-xl text-sm font-medium hover:bg-success/90 transition-colors"
+                      >
+                        ✓ Odobri kreatora
+                      </button>
+                      <button
+                        onClick={() => {
+                          setViewingCreator(null);
+                          openRejectModal(viewingCreator);
+                        }}
+                        className="flex-1 py-3 bg-error text-white rounded-xl text-sm font-medium hover:bg-error/90 transition-colors"
+                      >
+                        ✕ Odbij kreatora
+                      </button>
+                    </>
+                  ) : (
+                    // Već odobreni kreatori - prikaži status dropdown
+                    <div className="flex-1 flex items-center gap-3">
+                      <span className="text-sm text-muted">Status:</span>
+                      <select
+                        value={viewingCreator.status || (viewingCreator.approved ? 'approved' : 'pending')}
+                        onChange={(e) => {
+                          handleChangeStatus(viewingCreator.id, e.target.value as CreatorStatus);
+                          setViewingCreator({...viewingCreator, status: e.target.value as CreatorStatus});
+                        }}
+                        className={`px-4 py-2 rounded-xl text-sm cursor-pointer transition-colors border-0 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
+                          (viewingCreator.status === 'approved' || (viewingCreator.approved && !viewingCreator.status))
+                            ? 'bg-black text-white' 
+                            : viewingCreator.status === 'pending'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}
+                      >
+                        <option value="approved">Aktivan</option>
+                        <option value="pending">Na čekanju</option>
+                        <option value="deactivated">Neaktivan</option>
+                      </select>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setViewingCreator(null)}
+                    className={`${viewingFromPending ? 'flex-1' : ''} py-3 px-6 border border-border rounded-xl text-sm font-medium hover:bg-secondary transition-colors`}
+                  >
+                    Zatvori
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Creator Modal */}
+        {editingCreator && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-medium">Uredi kreatora</h3>
+                <button 
+                  onClick={() => setEditingCreator(null)}
+                  className="text-muted hover:text-foreground"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                handleSaveCreator(editingCreator);
+              }} className="space-y-4">
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Ime</label>
+                  <input
+                    type="text"
+                    value={editingCreator.name}
+                    onChange={(e) => setEditingCreator({...editingCreator, name: e.target.value})}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Email</label>
+                  <input
+                    type="email"
+                    value={editingCreator.email}
+                    onChange={(e) => setEditingCreator({...editingCreator, email: e.target.value})}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Lokacija</label>
+                  <input
+                    type="text"
+                    value={editingCreator.location}
+                    onChange={(e) => setEditingCreator({...editingCreator, location: e.target.value})}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Bio</label>
+                  <textarea
+                    value={editingCreator.bio}
+                    onChange={(e) => setEditingCreator({...editingCreator, bio: e.target.value})}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted resize-none"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Cena (€)</label>
+                  <input
+                    type="number"
+                    value={editingCreator.priceFrom}
+                    onChange={(e) => setEditingCreator({...editingCreator, priceFrom: Number(e.target.value)})}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Telefon</label>
+                  <input
+                    type="text"
+                    value={editingCreator.phone || ''}
+                    onChange={(e) => setEditingCreator({...editingCreator, phone: e.target.value})}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                  />
+                </div>
+                
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm text-muted mb-1 block">Instagram</label>
+                    <input
+                      type="text"
+                      value={editingCreator.instagram || ''}
+                      onChange={(e) => setEditingCreator({...editingCreator, instagram: e.target.value})}
+                      className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                      placeholder="@username"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-muted mb-1 block">TikTok</label>
+                    <input
+                      type="text"
+                      value={editingCreator.tiktok || ''}
+                      onChange={(e) => setEditingCreator({...editingCreator, tiktok: e.target.value})}
+                      className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                      placeholder="@username"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-muted mb-1 block">YouTube</label>
+                    <input
+                      type="text"
+                      value={editingCreator.youtube || ''}
+                      onChange={(e) => setEditingCreator({...editingCreator, youtube: e.target.value})}
+                      className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
+                      placeholder="@channel"
+                    />
+                  </div>
+                </div>
+
+                {/* Portfolio Section */}
+                {editingCreator.portfolio && editingCreator.portfolio.length > 0 && (
+                  <div className="pt-4 mt-4 border-t border-border">
+                    <label className="text-sm text-muted mb-3 block">Portfolio ({editingCreator.portfolio.length} stavki)</label>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {editingCreator.portfolio.map((item, index) => (
+                        <div key={index} className="relative group">
+                          <div className="aspect-square rounded-lg overflow-hidden bg-secondary">
+                            {item.thumbnail ? (
+                              <img src={item.thumbnail} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-muted">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                          {/* Desktop: X button on hover */}
+                          <button
+                            type="button"
+                            onClick={() => setDeletingPortfolioIndex(index)}
+                            className="hidden sm:flex absolute -top-1 -right-1 w-5 h-5 bg-error text-white rounded-full items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Obriši"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                          {/* Mobile: Trash icon always visible */}
+                          <button
+                            type="button"
+                            onClick={() => setDeletingPortfolioIndex(index)}
+                            className="sm:hidden absolute -top-1 -right-1 w-6 h-6 bg-error text-white rounded-full flex items-center justify-center shadow-sm"
+                            title="Obriši"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Desktop hint */}
+                    <p className="hidden sm:block text-xs text-muted mt-2">Pređi mišem preko stavke i klikni X da obrišeš</p>
+
+                    {/* Confirm Delete Portfolio Modal */}
+                    {deletingPortfolioIndex !== null && (
+                      <div 
+                        className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4"
+                        onClick={() => setDeletingPortfolioIndex(null)}
+                      >
+                        <div 
+                          className="bg-white rounded-xl max-w-sm w-full p-6"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="text-center">
+                            <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                              <svg className="w-8 h-8 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </div>
+                            
+                            <h3 className="text-lg font-semibold mb-2">Obriši portfolio stavku?</h3>
+                            <p className="text-muted text-sm mb-4">
+                              Da li ste sigurni da želite da obrišete ovu stavku iz portfolia kreatora?
+                            </p>
+
+                            {editingCreator.portfolio[deletingPortfolioIndex]?.thumbnail && (
+                              <div className="mb-4 rounded-lg overflow-hidden border border-border mx-auto w-24 h-24">
+                                <img 
+                                  src={editingCreator.portfolio[deletingPortfolioIndex].thumbnail} 
+                                  alt=""
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            )}
+                            
+                            <div className="flex gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setDeletingPortfolioIndex(null)}
+                                className="flex-1 py-2.5 border border-border rounded-lg font-medium hover:bg-secondary transition-colors"
+                              >
+                                Odustani
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newPortfolio = editingCreator.portfolio.filter((_, i) => i !== deletingPortfolioIndex);
+                                  setEditingCreator({...editingCreator, portfolio: newPortfolio});
+                                  setDeletingPortfolioIndex(null);
+                                }}
+                                className="flex-1 py-2.5 bg-error text-white rounded-lg font-medium hover:bg-error/90 transition-colors"
+                              >
+                                Obriši
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Reset Password Section */}
+                <div className="pt-4 mt-4 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Resetuj lozinku</p>
+                      <p className="text-xs text-muted">Pošalji link za reset lozinke na email kreatora</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // TODO: API call to send password reset email
+                        // POST /api/admin/reset-password { userId: editingCreator.id, userType: 'creator' }
+                        alert(`Demo: Link za reset lozinke će biti poslat na ${editingCreator.email}`);
+                      }}
+                      className="px-4 py-2 text-sm border border-amber-500 text-amber-600 rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-2"
+                    >
+                      <svg className="hidden sm:block w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                      </svg>
+                      Pošalji reset link
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setEditingCreator(null)}
+                    className="flex-1 py-3 border border-border rounded-xl hover:bg-secondary transition-colors"
+                  >
+                    Otkaži
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 bg-primary text-white rounded-xl hover:bg-primary/90 transition-colors"
+                  >
+                    Sačuvaj
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za odbijanje kreatora */}
+        {rejectingCreator && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-error">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-medium mb-2">Odbij kreatora</h3>
+                <p className="text-muted text-sm">
+                  Odbijate profil: <strong>{rejectingCreator.name}</strong>
+                </p>
+              </div>
+
+              <div className="mb-6">
+                <label className="text-sm text-muted mb-2 block">Razlog odbijanja *</label>
+                <textarea
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  rows={4}
+                  className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-error resize-none"
+                  placeholder="Unesite razlog odbijanja profila (biće prikazan kreatoru)..."
+                  required
+                />
+                <p className="text-xs text-muted mt-1">
+                  Kreator će videti ovaj razlog na svom dashboardu
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setRejectingCreator(null);
+                    setRejectionReason('');
+                  }}
+                  className="flex-1 py-3 border border-border rounded-xl hover:bg-secondary transition-colors"
+                >
+                  Otkaži
+                </button>
+                <button
+                  onClick={() => {
+                    if (rejectionReason.trim()) {
+                      handleReject(rejectingCreator.id, rejectionReason.trim());
+                    } else {
+                      alert('Molimo unesite razlog odbijanja');
+                    }
+                  }}
+                  className="flex-1 py-3 bg-error text-white rounded-xl hover:bg-error/90 transition-colors"
+                >
+                  Potvrdi odbijanje
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za odbijanje recenzije */}
+        {rejectingReview && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+              <h3 className="text-xl font-medium mb-2">Odbij recenziju</h3>
+              <p className="text-sm text-muted mb-4">
+                Recenzija od <strong>{rejectingReview.businessName}</strong> za kreatora
+              </p>
+
+              <div className="mb-6">
+                <label className="text-sm text-muted mb-2 block">Razlog odbijanja (opcionalno)</label>
+                <textarea
+                  value={reviewRejectionReason}
+                  onChange={(e) => setReviewRejectionReason(e.target.value)}
+                  rows={3}
+                  placeholder="Npr. Neprimeren sadržaj, spam..."
+                  className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-error resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setRejectingReview(null);
+                    setReviewRejectionReason('');
+                  }}
+                  className="flex-1 py-3 border border-border rounded-xl hover:bg-secondary transition-colors"
+                >
+                  Otkaži
+                </button>
+                <button
+                  onClick={() => {
+                    rejectReview(rejectingReview.id, reviewRejectionReason.trim() || undefined);
+                    setRejectingReview(null);
+                    setReviewRejectionReason('');
+                  }}
+                  className="flex-1 py-3 bg-error text-white rounded-xl hover:bg-error/90 transition-colors"
+                >
+                  Odbij recenziju
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za brisanje kategorije */}
+        {deletingCategory && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setDeletingCategory(null)}
+          >
+            <div 
+              className="bg-white rounded-xl max-w-sm w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                {/* Warning Icon */}
+                <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-lg font-semibold mb-2">Obriši kategoriju?</h3>
+                <p className="text-muted text-sm mb-6">
+                  Da li ste sigurni da želite da obrišete kategoriju <strong>"{deletingCategory}"</strong>? Ova akcija se ne može poništiti.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeletingCategory(null)}
+                    className="flex-1 py-2.5 border border-border rounded-lg font-medium hover:bg-secondary transition-colors"
+                  >
+                    Odustani
+                  </button>
+                  <button
+                    onClick={confirmDeleteCategory}
+                    className="flex-1 py-2.5 bg-error text-white rounded-lg font-medium hover:bg-error/90 transition-colors"
+                  >
+                    Obriši
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za brisanje kreatora */}
+        {deletingCreator && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setDeletingCreator(null)}
+          >
+            <div 
+              className="bg-white rounded-xl max-w-sm w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                {/* Warning Icon */}
+                <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-lg font-semibold mb-2">Obriši kreatora?</h3>
+                <p className="text-muted text-sm mb-6">
+                  Da li ste sigurni da želite da obrišete kreatora <strong>"{deletingCreator.name}"</strong>? Svi podaci, portfolio i recenzije će biti trajno obrisani.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeletingCreator(null)}
+                    className="flex-1 py-2.5 border border-border rounded-lg font-medium hover:bg-secondary transition-colors"
+                  >
+                    Odustani
+                  </button>
+                  <button
+                    onClick={confirmDeleteCreator}
+                    className="flex-1 py-2.5 bg-error text-white rounded-lg font-medium hover:bg-error/90 transition-colors"
+                  >
+                    Obriši
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za brisanje biznisa */}
+        {deletingBusiness && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setDeletingBusiness(null)}
+          >
+            <div 
+              className="bg-white rounded-xl max-w-sm w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                {/* Warning Icon */}
+                <div className="w-16 h-16 bg-error/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-lg font-semibold mb-2">Obriši biznis nalog?</h3>
+                <p className="text-muted text-sm mb-6">
+                  Da li ste sigurni da želite da obrišete biznis <strong>"{deletingBusiness.companyName}"</strong>? Svi podaci i recenzije će biti trajno obrisani.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeletingBusiness(null)}
+                    className="flex-1 py-2.5 border border-border rounded-lg font-medium hover:bg-secondary transition-colors"
+                  >
+                    Odustani
+                  </button>
+                  <button
+                    onClick={confirmDeleteBusiness}
+                    className="flex-1 py-2.5 bg-error text-white rounded-lg font-medium hover:bg-error/90 transition-colors"
+                  >
+                    Obriši
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za pregled biznisa */}
+        {viewingBusiness && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setViewingBusiness(null)}
+          >
+            <div 
+              className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-border">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium">Detalji biznisa</h3>
+                  <button 
+                    onClick={() => setViewingBusiness(null)}
+                    className="text-muted hover:text-foreground transition-colors"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 space-y-4">
+                {/* Company Name */}
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center">
+                    <span className="text-2xl font-semibold text-primary">
+                      {viewingBusiness.companyName.charAt(0)}
+                    </span>
+                  </div>
+                  <div>
+                    <h4 className="text-xl font-semibold">{viewingBusiness.companyName}</h4>
+                    <p className="text-sm text-muted">{viewingBusiness.email}</p>
+                  </div>
+                </div>
+
+                {/* Status */}
+                <div className="bg-secondary/50 rounded-xl p-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-muted uppercase tracking-wider mb-1">Status</p>
+                      <span className={`inline-flex px-3 py-1 rounded-lg text-xs font-medium ${
+                        viewingBusiness.subscriptionStatus === 'active' 
+                          ? 'bg-black text-white' 
+                          : viewingBusiness.subscriptionStatus === 'expired'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {viewingBusiness.subscriptionStatus === 'active' ? 'Aktivan' : 
+                         viewingBusiness.subscriptionStatus === 'expired' ? 'Istekao' : 'Neaktivan'}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted uppercase tracking-wider mb-1">Plan</p>
+                      <p className="font-medium">
+                        {viewingBusiness.subscriptionType === 'yearly' ? 'Godišnji (€490/god)' : 
+                         viewingBusiness.subscriptionType === 'monthly' ? 'Mesečni (€49/mes)' : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted uppercase tracking-wider mb-1">Ističe</p>
+                      <p className="font-medium">{viewingBusiness.expiresAt || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted uppercase tracking-wider mb-1">ID</p>
+                      <p className="font-mono text-sm">{viewingBusiness.id}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Contact Info */}
+                <div>
+                  <p className="text-xs text-muted uppercase tracking-wider mb-2">Kontakt podaci</p>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm">
+                      <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      <span>{viewingBusiness.email}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="p-6 border-t border-border flex gap-3">
+                <button
+                  onClick={() => {
+                    setViewingBusiness(null);
+                    setEditingBusiness(viewingBusiness);
+                  }}
+                  className="flex-1 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                  Uredi
+                </button>
+                <button
+                  onClick={() => setViewingBusiness(null)}
+                  className="px-6 py-3 border border-border rounded-xl font-medium hover:bg-secondary transition-colors"
+                >
+                  Zatvori
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal za uređivanje biznisa */}
+        {editingBusiness && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setEditingBusiness(null)}
+          >
+            <div 
+              className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-border">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium">Uredi biznis</h3>
+                  <button 
+                    onClick={() => setEditingBusiness(null)}
+                    className="text-muted hover:text-foreground transition-colors"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Form */}
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm text-muted mb-2">Naziv kompanije</label>
+                  <input
+                    type="text"
+                    value={editingBusiness.companyName}
+                    onChange={(e) => setEditingBusiness({...editingBusiness, companyName: e.target.value})}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-muted mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={editingBusiness.email}
+                    onChange={(e) => setEditingBusiness({...editingBusiness, email: e.target.value})}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-muted mb-2">Website</label>
+                    <input
+                      type="url"
+                      value={editingBusiness.website || ''}
+                      onChange={(e) => setEditingBusiness({...editingBusiness, website: e.target.value})}
+                      className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary text-sm"
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted mb-2">Industrija</label>
+                    <input
+                      type="text"
+                      value={editingBusiness.industry || ''}
+                      onChange={(e) => setEditingBusiness({...editingBusiness, industry: e.target.value})}
+                      className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary text-sm"
+                      placeholder="npr. Tech, Fashion..."
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-muted mb-2">Opis kompanije</label>
+                  <textarea
+                    value={editingBusiness.description || ''}
+                    onChange={(e) => setEditingBusiness({...editingBusiness, description: e.target.value})}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary resize-none"
+                    placeholder="Kratak opis kompanije..."
+                  />
+                </div>
+
+                <div className="pt-4 mt-2 border-t border-border">
+                  <p className="text-xs text-muted uppercase tracking-wider mb-3">Pretplata</p>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-muted mb-2">Status</label>
+                      <select
+                        value={editingBusiness.subscriptionStatus}
+                        onChange={(e) => setEditingBusiness({...editingBusiness, subscriptionStatus: e.target.value as 'active' | 'expired' | 'none'})}
+                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                      >
+                        <option value="active">Aktivan</option>
+                        <option value="expired">Istekao</option>
+                        <option value="none">Neaktivan</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-muted mb-2">Tip</label>
+                      <select
+                        value={editingBusiness.subscriptionType || ''}
+                        onChange={(e) => setEditingBusiness({...editingBusiness, subscriptionType: e.target.value === '' ? null : e.target.value as 'monthly' | 'yearly'})}
+                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                      >
+                        <option value="">Nije odabrano</option>
+                        <option value="monthly">Mesečni</option>
+                        <option value="yearly">Godišnji</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                    <div>
+                      <label className="block text-sm text-muted mb-2">Datum pretplate</label>
+                      <input
+                        type="date"
+                        value={editingBusiness.subscribedAt || ''}
+                        onChange={(e) => setEditingBusiness({...editingBusiness, subscribedAt: e.target.value})}
+                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-muted mb-2">Datum isteka</label>
+                      <input
+                        type="date"
+                        value={editingBusiness.expiresAt || ''}
+                        onChange={(e) => setEditingBusiness({...editingBusiness, expiresAt: e.target.value})}
+                        className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reset Password Section */}
+                <div className="pt-4 mt-4 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Resetuj lozinku</p>
+                      <p className="text-xs text-muted">Pošalji link za reset lozinke na email biznisa</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // TODO: API call to send password reset email
+                        // POST /api/admin/reset-password { userId: editingBusiness.id, userType: 'business' }
+                        alert(`Demo: Link za reset lozinke će biti poslat na ${editingBusiness.email}`);
+                      }}
+                      className="px-4 py-2 text-sm border border-amber-500 text-amber-600 rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-2"
+                    >
+                      <svg className="hidden sm:block w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                      </svg>
+                      Pošalji reset link
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="p-6 border-t border-border flex gap-3">
+                <button
+                  onClick={() => handleSaveBusiness(editingBusiness)}
+                  className="flex-1 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors"
+                >
+                  Sačuvaj izmene
+                </button>
+                <button
+                  onClick={() => setEditingBusiness(null)}
+                  className="px-6 py-3 border border-border rounded-xl font-medium hover:bg-secondary transition-colors"
+                >
+                  Otkaži
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

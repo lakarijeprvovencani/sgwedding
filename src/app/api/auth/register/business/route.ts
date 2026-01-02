@@ -1,0 +1,158 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+// POST /api/auth/register/business
+// Registracija novog biznisa (poziva se nakon uspešnog Stripe plaćanja)
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    
+    const {
+      email,
+      password,
+      companyName,
+      website,
+      industry,
+      description,
+      plan, // 'monthly' | 'yearly'
+      stripeCustomerId,
+      stripeSubscriptionId,
+    } = body;
+
+    // Validacija
+    if (!email || !password || !companyName) {
+      return NextResponse.json(
+        { error: 'Nedostaju obavezna polja' },
+        { status: 400 }
+      );
+    }
+
+    if (password.length < 6) {
+      return NextResponse.json(
+        { error: 'Lozinka mora imati najmanje 6 karaktera' },
+        { status: 400 }
+      );
+    }
+
+    // Kreiraj Supabase admin client
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
+    // 1. Proveri da li email već postoji
+    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+    const emailExists = existingUsers?.users?.some(u => u.email === email);
+    
+    if (emailExists) {
+      return NextResponse.json(
+        { error: 'Email adresa je već registrovana' },
+        { status: 400 }
+      );
+    }
+
+    // 2. Kreiraj korisnika u Supabase Auth
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true, // Business ne treba email verifikaciju jer su platili
+      user_metadata: {
+        role: 'business',
+        companyName,
+      },
+    });
+
+    if (authError) {
+      console.error('Supabase Auth error:', authError);
+      return NextResponse.json(
+        { error: authError.message },
+        { status: 400 }
+      );
+    }
+
+    if (!authData.user) {
+      return NextResponse.json(
+        { error: 'Greška pri kreiranju korisnika' },
+        { status: 500 }
+      );
+    }
+
+    // 3. Kreiraj user record u našoj tabeli
+    const { error: userError } = await supabaseAdmin
+      .from('users')
+      .insert({
+        id: authData.user.id,
+        email,
+        role: 'business',
+      });
+
+    if (userError) {
+      console.error('User insert error:', userError);
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+      return NextResponse.json(
+        { error: 'Greška pri kreiranju korisnika u bazi' },
+        { status: 500 }
+      );
+    }
+
+    // 4. Izračunaj datum isteka pretplate
+    const subscribedAt = new Date();
+    const expiresAt = new Date();
+    if (plan === 'yearly') {
+      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+    } else {
+      expiresAt.setMonth(expiresAt.getMonth() + 1);
+    }
+
+    // 5. Kreiraj business profil sa Stripe podacima
+    const { data: businessData, error: businessError } = await supabaseAdmin
+      .from('businesses')
+      .insert({
+        user_id: authData.user.id,
+        company_name: companyName,
+        email,
+        website: website || null,
+        industry: industry || null,
+        description: description || null,
+        subscription_type: plan || 'monthly',
+        subscription_status: 'active',
+        subscribed_at: subscribedAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+        stripe_customer_id: stripeCustomerId || null,
+        stripe_subscription_id: stripeSubscriptionId || null,
+      })
+      .select()
+      .single();
+
+    if (businessError) {
+      console.error('Business insert error:', businessError);
+      await supabaseAdmin.from('users').delete().eq('id', authData.user.id);
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+      return NextResponse.json(
+        { error: 'Greška pri kreiranju poslovnog profila' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Registracija uspešna!',
+      userId: authData.user.id,
+      businessId: businessData.id,
+      companyName: businessData.company_name,
+    });
+
+  } catch (error) {
+    console.error('Business registration error:', error);
+    return NextResponse.json(
+      { error: 'Greška na serveru' },
+      { status: 500 }
+    );
+  }
+}
