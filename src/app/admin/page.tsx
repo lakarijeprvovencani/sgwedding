@@ -16,7 +16,6 @@ export default function AdminPage() {
     updateCreator, 
     deleteCreator, 
     isHydrated,
-    getCreatorById,
   } = useDemo();
   const [activeTab, setActiveTab] = useState<AdminTab>('pending');
   
@@ -232,7 +231,7 @@ export default function AdminPage() {
       const response = await fetch('/api/reviews', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviewId, status: 'rejected' }),
+        body: JSON.stringify({ reviewId, status: 'rejected', rejectionReason: reason }),
       });
       if (response.ok) {
         await refreshReviews();
@@ -312,9 +311,9 @@ export default function AdminPage() {
     });
   }, [fetchedReviews, reviewStatusFilter, selectedReviewCreator]);
   
-  // Helper za dobijanje imena kreatora
+  // Helper za dobijanje imena kreatora (koristi fetchedCreators iz Supabase)
   const getCreatorName = (creatorId: string): string => {
-    const creator = getCreatorById(creatorId);
+    const creator = fetchedCreators.find(c => c.id === creatorId);
     return creator?.name || 'Nepoznat kreator';
   };
 
@@ -1416,7 +1415,7 @@ export default function AdminPage() {
                             <div className="font-medium text-sm">{review.businessName}</div>
                             <div className="text-xs text-muted">
                               Za: <Link href={`/kreator/${review.creatorId}`} className="text-primary hover:underline">
-                                {getCreatorName(review.creatorId)}
+                                {review.creator?.name || 'Nepoznat kreator'}
                               </Link>
                             </div>
                           </div>
@@ -1490,7 +1489,7 @@ export default function AdminPage() {
                         )}
                         {review.status === 'rejected' && (
                           <button
-                            onClick={() => approveReview(review.id)}
+                            onClick={() => handleApproveReview(review.id)}
                             className="px-4 py-2 border border-success text-success rounded-lg text-sm font-medium hover:bg-success/10 transition-colors"
                           >
                             Odobri
@@ -2091,7 +2090,7 @@ export default function AdminPage() {
             <div className="bg-white rounded-2xl p-6 max-w-md w-full">
               <h3 className="text-xl font-medium mb-2">Odbij recenziju</h3>
               <p className="text-sm text-muted mb-4">
-                Recenzija od <strong>{rejectingReview.businessName}</strong> za kreatora
+                Recenzija od <strong>{rejectingReview.businessName}</strong> za kreatora <strong>{rejectingReview.creator?.name || 'Nepoznat'}</strong>
               </p>
 
               <div className="mb-6">

@@ -5,14 +5,14 @@ import Image from 'next/image';
 import { useState, useRef, useEffect } from 'react';
 import { Creator } from '@/lib/mockData';
 import { useDemo } from '@/context/DemoContext';
-import { generateReviewStats } from '@/types/review';
 
 interface CreatorCardProps {
   creator: Creator;
+  priority?: boolean; // For above-the-fold images
 }
 
-export default function CreatorCard({ creator }: CreatorCardProps) {
-  const { currentUser, getReviewsForCreator } = useDemo();
+export default function CreatorCard({ creator, priority = false }: CreatorCardProps) {
+  const { currentUser } = useDemo();
   const [showCategoriesTooltip, setShowCategoriesTooltip] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const [hoveredPlatform, setHoveredPlatform] = useState<string | null>(null);
@@ -25,9 +25,9 @@ export default function CreatorCard({ creator }: CreatorCardProps) {
   const canSeeContact = currentUser.type === 'admin' || currentUser.type === 'business';
   const isAdmin = currentUser.type === 'admin';
   
-  // Get reviews and stats for this creator
-  const reviews = getReviewsForCreator(creator.id, true);
-  const stats = generateReviewStats(reviews);
+  // Use rating directly from the creator object (from Supabase)
+  const averageRating = creator.rating || 0;
+  const totalReviews = creator.totalReviews || 0;
   
   // Determine status for display
   const status = creator.status || (creator.approved ? 'approved' : 'pending');
@@ -65,6 +65,8 @@ export default function CreatorCard({ creator }: CreatorCardProps) {
               src={creator.photo}
               alt={creator.name || 'Kreator'}
               fill
+              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+              priority={priority}
               className="object-cover group-hover:scale-105 transition-transform duration-500"
             />
           ) : (
@@ -140,15 +142,15 @@ export default function CreatorCard({ creator }: CreatorCardProps) {
           <p className="text-xs sm:text-sm text-muted mb-1.5 sm:mb-2 truncate">{creator.location}</p>
           
           {/* Rating */}
-          {stats.totalReviews > 0 && (
+          {totalReviews > 0 && (
             <div className="flex items-center gap-1 sm:gap-2 mb-2 sm:mb-3">
               <div className="flex items-center">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <svg
                     key={star}
                     viewBox="0 0 24 24"
-                    fill={star <= Math.round(stats.averageRating) ? '#f59e0b' : 'none'}
-                    stroke={star <= Math.round(stats.averageRating) ? '#f59e0b' : '#e5e5e5'}
+                    fill={star <= Math.round(averageRating) ? '#f59e0b' : 'none'}
+                    stroke={star <= Math.round(averageRating) ? '#f59e0b' : '#e5e5e5'}
                     strokeWidth={2}
                     className="w-3 h-3 sm:w-4 sm:h-4"
                   >
@@ -160,8 +162,8 @@ export default function CreatorCard({ creator }: CreatorCardProps) {
                   </svg>
                 ))}
               </div>
-              <span className="text-xs sm:text-sm font-medium">{stats.averageRating.toFixed(1)}</span>
-              <span className="text-[10px] sm:text-xs text-muted">({stats.totalReviews})</span>
+              <span className="text-xs sm:text-sm font-medium">{averageRating.toFixed(1)}</span>
+              <span className="text-[10px] sm:text-xs text-muted">({totalReviews})</span>
             </div>
           )}
           

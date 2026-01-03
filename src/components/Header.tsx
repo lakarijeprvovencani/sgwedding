@@ -7,7 +7,7 @@ import { useDemo } from '@/context/DemoContext';
 
 export default function Header() {
   const router = useRouter();
-  const { currentUser, isLoggedIn, logout, isHydrated, getOwnCreatorId, getCreatorById } = useDemo();
+  const { currentUser, isLoggedIn, logout, isHydrated } = useDemo();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   // Logout i redirect na početnu
@@ -16,23 +16,14 @@ export default function Header() {
     router.push('/');
   };
 
-  // Dohvati pravo ime korisnika
+  // Dohvati pravo ime korisnika (sada dolazi direktno iz currentUser koji se popunjava iz Supabase)
   const getUserDisplayName = () => {
-    if (currentUser.type === 'creator') {
-      const creatorId = getOwnCreatorId();
-      if (creatorId) {
-        const creator = getCreatorById(creatorId);
-        if (creator) {
-          return creator.name;
-        }
-      }
-    }
     // Za business, koristi companyName ako postoji
     if (currentUser.type === 'business' && currentUser.companyName) {
       return currentUser.companyName;
     }
-    // Za admin i fallback
-    return currentUser.name;
+    // Za creator, admin i ostale - koristi name iz currentUser (dolazi iz Supabase)
+    return currentUser.name || 'Korisnik';
   };
 
   const displayName = isLoggedIn ? getUserDisplayName() : '';

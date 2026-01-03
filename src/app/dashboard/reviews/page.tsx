@@ -1,27 +1,134 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDemo } from '@/context/DemoContext';
 import Link from 'next/link';
 import ReviewCard from '@/components/ReviewCard';
 
+interface Review {
+  id: string;
+  creatorId: string;
+  businessId: string;
+  businessName: string;
+  rating: number;
+  comment: string;
+  status: 'pending' | 'approved' | 'rejected';
+  creatorReply?: string;
+  creatorReplyAt?: string;
+  createdAt: string;
+}
+
+interface Creator {
+  id: string;
+  name: string;
+}
+
 export default function BusinessReviewsPage() {
-  const { 
-    currentUser, 
-    isHydrated, 
-    getReviewsByBusiness,
-    getCreatorById,
-    deleteReview,
-  } = useDemo();
+  const { currentUser, isHydrated } = useDemo();
   
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [creators, setCreators] = useState<Record<string, Creator>>({});
+  const [isLoading, setIsLoading] = useState(true);
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
 
-  // Only business users can see this page
-  if (!isHydrated) {
+  // Fetch reviews from Supabase
+  useEffect(() => {
+    const fetchReviews = async () => {
+      if (!isHydrated || currentUser.type !== 'business' || !currentUser.businessId) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        // Fetch reviews for this business
+        const response = await fetch(`/api/reviews?businessId=${currentUser.businessId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setReviews(data.reviews || []);
+          
+          // Fetch creator names for each unique creatorId
+          const creatorIds = [...new Set((data.reviews || []).map((r: Review) => r.creatorId))];
+          const creatorsMap: Record<string, Creator> = {};
+          
+          for (const creatorId of creatorIds) {
+            try {
+              const creatorRes = await fetch(`/api/creators/${creatorId}`);
+              if (creatorRes.ok) {
+                const creatorData = await creatorRes.json();
+                creatorsMap[creatorId as string] = {
+                  id: creatorId as string,
+                  name: creatorData.creator?.name || 'Nepoznat kreator',
+                };
+              }
+            } catch (err) {
+              console.error('Error fetching creator:', err);
+            }
+          }
+          
+          setCreators(creatorsMap);
+        }
+      } catch (error) {
+        console.error('Error fetching reviews:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchReviews();
+  }, [isHydrated, currentUser.type, currentUser.businessId]);
+
+  // Sort reviews
+  const sortedReviews = [...reviews].sort((a, b) => {
+    switch (sortBy) {
+      case 'newest':
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case 'oldest':
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      case 'highest':
+        return b.rating - a.rating;
+      case 'lowest':
+        return a.rating - b.rating;
+      default:
+        return 0;
+    }
+  });
+
+  // Handle review delete
+  const handleDeleteReview = async (reviewId: string) => {
+    try {
+      const response = await fetch(`/api/reviews?reviewId=${reviewId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        setReviews(prev => prev.filter(r => r.id !== reviewId));
+        setShowDeleteSuccess(true);
+        setTimeout(() => setShowDeleteSuccess(false), 3000);
+      }
+    } catch (error) {
+      console.error('Error deleting review:', error);
+    }
+  };
+
+  // Get creator name helper
+  const getCreatorName = (creatorId: string): string => {
+    return creators[creatorId]?.name || 'Nepoznat kreator';
+  };
+  
+  // Get creator link helper
+  const getCreatorLink = (creatorId: string): string => {
+    return `/kreator/${creatorId}`;
+  };
+
+  // Loading state
+  if (!isHydrated || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse text-muted">Učitavanje...</div>
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted">Učitavanje...</p>
+        </div>
       </div>
     );
   }
@@ -47,44 +154,6 @@ export default function BusinessReviewsPage() {
       </div>
     );
   }
-
-  // Get business reviews
-  const businessId = currentUser.businessId || 'b1';
-  const reviews = getReviewsByBusiness(businessId);
-  
-  // Sort reviews
-  const sortedReviews = [...reviews].sort((a, b) => {
-    switch (sortBy) {
-      case 'newest':
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      case 'oldest':
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      case 'highest':
-        return b.rating - a.rating;
-      case 'lowest':
-        return a.rating - b.rating;
-      default:
-        return 0;
-    }
-  });
-
-  // Handle review delete
-  const handleDeleteReview = (reviewId: string) => {
-    deleteReview(reviewId);
-    setShowDeleteSuccess(true);
-    setTimeout(() => setShowDeleteSuccess(false), 3000);
-  };
-
-  // Get creator name helper
-  const getCreatorName = (creatorId: string): string => {
-    const creator = getCreatorById(creatorId);
-    return creator?.name || 'Nepoznat kreator';
-  };
-  
-  // Get creator link helper
-  const getCreatorLink = (creatorId: string): string => {
-    return `/kreator/${creatorId}`;
-  };
 
   return (
     <div className="min-h-screen bg-secondary/30">
@@ -200,8 +269,3 @@ export default function BusinessReviewsPage() {
     </div>
   );
 }
-
-
-
-
-

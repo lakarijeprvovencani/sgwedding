@@ -16,13 +16,19 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to fetch categories' }, { status: 500 });
     }
 
-    return NextResponse.json({ 
+    const response = NextResponse.json({ 
       categories: categories.map(c => c.name) 
     });
+    
+    // Categories rarely change - cache for 5 minutes
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    
+    return response;
 
   } catch (error: any) {
     console.error('Categories fetch error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
 

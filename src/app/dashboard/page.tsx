@@ -96,6 +96,11 @@ function CreatorDashboard() {
     priceFrom: 0,
   });
   
+  // Available options for multi-select (categories fetched from database)
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const availablePlatforms = ['Instagram', 'TikTok', 'YouTube'];
+  const availableLanguages = ['Srpski', 'Engleski', 'Nemački', 'Francuski', 'Španski', 'Italijanski'];
+  
   // Fetch creator data from Supabase
   useEffect(() => {
     const fetchCreator = async () => {
@@ -172,6 +177,22 @@ function CreatorDashboard() {
     fetchReviews();
   }, [currentUser.creatorId]);
   
+  // Fetch categories from database
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch('/api/categories');
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableCategories(data.categories || []);
+        }
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+      }
+    };
+    fetchCategories();
+  }, []);
+  
   // Show loading state
   if (!isHydrated || isLoadingCreator) {
     return (
@@ -226,26 +247,6 @@ function CreatorDashboard() {
     }
   };
   
-  // Available options for multi-select (categories fetched from database)
-  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
-  const availablePlatforms = ['Instagram', 'TikTok', 'YouTube'];
-  const availableLanguages = ['Srpski', 'Engleski', 'Nemački', 'Francuski', 'Španski', 'Italijanski'];
-  
-  // Fetch categories from database
-  useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        const response = await fetch('/api/categories');
-        if (response.ok) {
-          const data = await response.json();
-          setAvailableCategories(data.categories || []);
-        }
-      } catch (error) {
-        console.error('Error fetching categories:', error);
-      }
-    };
-    fetchCategories();
-  }, []);
   
   // Use fetched reviews from Supabase
   const allReviews = reviews;
@@ -2141,6 +2142,12 @@ function BusinessDashboard() {
                                   {review.status === 'approved' ? 'Odobrena' : review.status === 'pending' ? 'Na čekanju' : 'Odbijena'}
                                 </span>
                               </div>
+                              {/* Show rejection reason hint */}
+                              {review.status === 'rejected' && review.rejectionReason && (
+                                <p className="text-xs text-error mt-1 line-clamp-1">
+                                  Razlog: {review.rejectionReason}
+                                </p>
+                              )}
                             </div>
                             <div className="flex items-center gap-1">
                               <button
@@ -2308,6 +2315,21 @@ function BusinessDashboard() {
                   {viewingReview.status === 'approved' ? 'Odobrena' : viewingReview.status === 'pending' ? 'Na čekanju' : 'Odbijena'}
                 </span>
               </div>
+
+              {/* Rejection Reason */}
+              {viewingReview.status === 'rejected' && viewingReview.rejectionReason && (
+                <div className="bg-error/5 border border-error/20 rounded-xl p-4 mb-4">
+                  <div className="flex items-start gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-error flex-shrink-0 mt-0.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-error mb-1">Razlog odbijanja</p>
+                      <p className="text-sm text-foreground">{viewingReview.rejectionReason}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Full Comment */}
               <div className="bg-secondary/50 rounded-xl p-4 mb-4 overflow-hidden">

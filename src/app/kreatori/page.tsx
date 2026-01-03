@@ -29,91 +29,78 @@ export default function KreatoriPage() {
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const creatorsPerPage = 12; // 12 kreatora po stranici
+  const creatorsPerPage = 12;
   
   // Get creator status for pending check
   const creatorStatus = getOwnCreatorStatus();
   
-  // Fetch categories from database
+  // Fetch categories, creators, and subscription status in PARALLEL
   useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        const response = await fetch('/api/categories');
-        if (response.ok) {
-          const data = await response.json();
-          setCategories(data.categories || []);
-        }
-      } catch (error) {
-        console.error('Error fetching categories:', error);
-      }
-    };
-    
-    fetchCategories();
-  }, []);
-  
-  // Fetch creators from Supabase
-  useEffect(() => {
-    const fetchCreators = async () => {
-      try {
-        const includeAll = currentUser.type === 'admin';
-        const response = await fetch(`/api/creators?includeAll=${includeAll}`);
-        if (response.ok) {
-          const data = await response.json();
-          setAllCreators(data.creators || []);
-        }
-      } catch (error) {
-        console.error('Error fetching creators:', error);
-      } finally {
-        setIsLoadingCreators(false);
-      }
-    };
-    
-    fetchCreators();
-  }, [currentUser.type]);
-  
-  // Fetch live subscription status from Supabase for business users
-  useEffect(() => {
-    const checkSubscription = async () => {
-      if (currentUser.type === 'business' && currentUser.businessId) {
-        try {
-          const supabase = createClient();
-          
-          // Try to find business by id first, then by user_id if not found
-          let { data, error } = await supabase
-            .from('businesses')
-            .select('subscription_status')
-            .eq('id', currentUser.businessId)
-            .single();
-          
-          // If not found by id, try by user_id (in case businessId is actually user_id)
-          if (error || !data) {
-            const result = await supabase
+    const fetchData = async () => {
+      setIsLoadingCreators(true);
+      
+      const includeAll = currentUser.type === 'admin';
+      
+      // Prepare all fetch promises
+      const categoriesPromise = fetch('/api/categories')
+        .then(res => res.ok ? res.json() : { categories: [] })
+        .catch(() => ({ categories: [] }));
+      
+      const creatorsPromise = fetch(`/api/creators?includeAll=${includeAll}&limit=100`)
+        .then(res => res.ok ? res.json() : { creators: [] })
+        .catch(() => ({ creators: [] }));
+      
+      const subscriptionPromise = (async () => {
+        if (currentUser.type === 'business' && currentUser.businessId) {
+          try {
+            const supabase = createClient();
+            
+            let { data, error } = await supabase
               .from('businesses')
               .select('subscription_status')
-              .eq('user_id', currentUser.businessId)
+              .eq('id', currentUser.businessId)
               .single();
-            data = result.data;
-            error = result.error;
-          }
-          
-          if (!error && data) {
-            console.log('Live subscription status:', data.subscription_status);
-            setLiveSubscriptionStatus(data.subscription_status);
-            // Also update the context if status changed
-            if (data.subscription_status !== currentUser.subscriptionStatus && updateCurrentUser) {
-              updateCurrentUser({ subscriptionStatus: data.subscription_status });
+            
+            if (error || !data) {
+              const result = await supabase
+                .from('businesses')
+                .select('subscription_status')
+                .eq('user_id', currentUser.businessId)
+                .single();
+              data = result.data;
             }
-          } else {
-            console.error('Error fetching subscription status:', error);
+            
+            return data?.subscription_status || null;
+          } catch {
+            return null;
           }
-        } catch (err) {
-          console.error('Error checking subscription:', err);
+        }
+        return null;
+      })();
+      
+      // Execute ALL in parallel
+      const [categoriesData, creatorsData, subscriptionStatus] = await Promise.all([
+        categoriesPromise,
+        creatorsPromise,
+        subscriptionPromise
+      ]);
+      
+      // Update state
+      setCategories(categoriesData.categories || []);
+      setAllCreators(creatorsData.creators || []);
+      
+      if (subscriptionStatus) {
+        setLiveSubscriptionStatus(subscriptionStatus);
+        if (subscriptionStatus !== currentUser.subscriptionStatus && updateCurrentUser) {
+          updateCurrentUser({ subscriptionStatus: subscriptionStatus });
         }
       }
+      
       setIsCheckingSubscription(false);
+      setIsLoadingCreators(false);
     };
     
-    checkSubscription();
+    fetchData();
   }, [currentUser.type, currentUser.businessId, currentUser.subscriptionStatus, updateCurrentUser]);
   
   // Check if business user has active subscription - use live status if available
@@ -138,22 +125,10 @@ export default function KreatoriPage() {
     handleResize();
   }, []);
   
-  // Helper to get creator rating - now uses data from API
-  const getCreatorRating = (creatorId: string): number => {
-    const creator = allCreators.find(c => c.id === creatorId);
-    return creator?.rating || 0;
-  };
-  
-  const getCreatorReviewCount = (creatorId: string): number => {
-    const creator = allCreators.find(c => c.id === creatorId);
-    return creator?.totalReviews || 0;
-  };
-  
-  // Filtered creators - must be declared as a hook before conditional returns
+  // Filtered creators - client-side filtering
   const filteredCreators = useMemo(() => {
     let results = allCreators.filter((creator) => {
-      // For admins, show all (already filtered in API)
-      // For others, only show approved (already handled in API)
+      // For admins, show all; for others, only approved (already filtered in API)
       if (currentUser.type !== 'admin' && creator.status !== 'approved') return false;
       
       if (selectedCategory && !creator.categories.includes(selectedCategory)) return false;
@@ -173,7 +148,7 @@ export default function KreatoriPage() {
         const query = searchQuery.toLowerCase();
         if (
           !creator.name.toLowerCase().includes(query) &&
-          !creator.bio.toLowerCase().includes(query) &&
+          !(creator.bio || '').toLowerCase().includes(query) &&
           !creator.location.toLowerCase().includes(query)
         ) {
           return false;
@@ -182,9 +157,8 @@ export default function KreatoriPage() {
       
       // Filter by minimum rating
       if (minRating) {
-        const creatorRating = getCreatorRating(creator.id);
         const minRatingNum = parseFloat(minRating);
-        if (creatorRating < minRatingNum) return false;
+        if ((creator.rating || 0) < minRatingNum) return false;
       }
 
       return true;
@@ -192,11 +166,11 @@ export default function KreatoriPage() {
     
     // Sort results
     if (sortBy === 'rating-desc') {
-      results.sort((a, b) => getCreatorRating(b.id) - getCreatorRating(a.id));
+      results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     } else if (sortBy === 'rating-asc') {
-      results.sort((a, b) => getCreatorRating(a.id) - getCreatorRating(b.id));
+      results.sort((a, b) => (a.rating || 0) - (b.rating || 0));
     } else if (sortBy === 'reviews') {
-      results.sort((a, b) => getCreatorReviewCount(b.id) - getCreatorReviewCount(a.id));
+      results.sort((a, b) => (b.totalReviews || 0) - (a.totalReviews || 0));
     } else if (sortBy === 'price-asc') {
       results.sort((a, b) => a.priceFrom - b.priceFrom);
     } else if (sortBy === 'price-desc') {
@@ -204,9 +178,9 @@ export default function KreatoriPage() {
     }
     
     return results;
-  }, [allCreators, currentUser.type, selectedCategory, selectedPlatform, selectedLanguage, priceRange, searchQuery, minRating, sortBy, getCreatorRating, getCreatorReviewCount]);
+  }, [allCreators, currentUser.type, selectedCategory, selectedPlatform, selectedLanguage, priceRange, searchQuery, minRating, sortBy]);
 
-  // Paginacija - prikaži samo kreatore za trenutnu stranicu
+  // Paginacija
   const totalPages = Math.ceil(filteredCreators.length / creatorsPerPage);
   const paginatedCreators = useMemo(() => {
     const startIndex = (currentPage - 1) * creatorsPerPage;
@@ -228,106 +202,12 @@ export default function KreatoriPage() {
     setSortBy('');
   };
   
-  // Show loading while checking subscription for business users
-  if (currentUser.type === 'business' && isCheckingSubscription) {
-    return (
-      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center bg-secondary/30">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted">Provera pretplate...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  // Show subscription required screen for business users with expired subscription
-  if (currentUser.type === 'business' && !hasActiveSubscription) {
-    return (
-      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center bg-secondary/30">
-        <div className="max-w-md mx-auto px-6 text-center">
-          <div className="bg-white rounded-3xl border border-border p-8 shadow-sm">
-            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-10 h-10 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            
-            <h1 className="text-2xl font-light mb-3">Pretplata je istekla</h1>
-            <p className="text-muted mb-8">
-              Vaša pretplata nije aktivna. Obnovite pretplatu da biste pristupili svim kreatorima i njihovim kontakt informacijama.
-            </p>
-            
-            <div className="space-y-3">
-              <Link
-                href="/pricing"
-                className="block w-full py-3.5 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors"
-              >
-                Obnovi pretplatu
-              </Link>
-              <Link
-                href="/dashboard"
-                className="block w-full py-3.5 border border-border rounded-xl font-medium hover:bg-secondary transition-colors"
-              >
-                Nazad na Dashboard
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  
-  // Show login required for guests
-  if (!isLoggedIn) {
-    return (
-      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center bg-secondary/30">
-        <div className="max-w-md mx-auto px-6 text-center">
-          <div className="bg-white rounded-3xl border border-border p-8 shadow-sm">
-            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-10 h-10 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-            </div>
-            
-            <h1 className="text-2xl font-light mb-3">Prijava potrebna</h1>
-            <p className="text-muted mb-8">
-              Prijavite se ili kreirajte nalog da biste videli sve kreatore.
-            </p>
-            
-            <div className="space-y-3">
-              <Link 
-                href="/login"
-                className="block w-full py-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors"
-              >
-                Prijavi se
-              </Link>
-              <Link 
-                href="/register/biznis"
-                className="block w-full py-4 border border-border rounded-xl font-medium hover:bg-secondary transition-colors"
-              >
-                Registruj se kao brend
-              </Link>
-              <Link 
-                href="/register/kreator"
-                className="block w-full py-3 text-sm text-muted hover:text-foreground transition-colors"
-              >
-                Ili postani kreator →
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Check if this is demo creator (ID "1" - Marija Petrović)
-  // Demo creators bypass pending/rejected checks for client presentations
+  // Check if current user is a creator with pending status
   const isDemoCreator = currentUser.creatorId === '1';
-
-  // If creator is pending or rejected, redirect to dashboard (they'll see proper screen there)
-  // Skip this check for demo creators
+  
+  // If current user is a pending/rejected creator, show special screen
   if (currentUser.type === 'creator' && creatorStatus && !isDemoCreator) {
-    if (creatorStatus.status === 'pending' || creatorStatus.status === 'rejected') {
+    if (creatorStatus === 'pending') {
       return (
         <div className="min-h-screen flex items-center justify-center bg-secondary/30">
           <div className="max-w-md mx-auto px-6 text-center">
@@ -335,7 +215,51 @@ export default function KreatoriPage() {
               <div className="text-5xl mb-6">⏳</div>
               <h1 className="text-2xl font-light mb-3">Profil na čekanju</h1>
               <p className="text-muted mb-8">
-                Vaš profil još uvek nije odobren. Dok čekate odobrenje, ne možete pregledati druge kreatore.
+                Tvoj profil je trenutno na čekanju odobrenja. Kada bude odobren, moći ćeš da pregledaš druge kreatore.
+              </p>
+              <Link 
+                href="/dashboard"
+                className="block w-full py-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors"
+              >
+                Nazad na dashboard
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    if (creatorStatus === 'rejected') {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-secondary/30">
+          <div className="max-w-md mx-auto px-6 text-center">
+            <div className="bg-white rounded-3xl p-10 border border-border shadow-sm">
+              <div className="text-5xl mb-6">❌</div>
+              <h1 className="text-2xl font-light mb-3">Profil odbijen</h1>
+              <p className="text-muted mb-8">
+                Nažalost, tvoj profil nije odobren. Molimo te da kontaktiraš podršku za više informacija.
+              </p>
+              <Link 
+                href="/dashboard"
+                className="block w-full py-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors"
+              >
+                Nazad na dashboard
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    if (creatorStatus === 'deactivated') {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-secondary/30">
+          <div className="max-w-md mx-auto px-6 text-center">
+            <div className="bg-white rounded-3xl p-10 border border-border shadow-sm">
+              <div className="text-5xl mb-6">🚫</div>
+              <h1 className="text-2xl font-light mb-3">Profil deaktiviran</h1>
+              <p className="text-muted mb-8">
+                Tvoj profil je trenutno deaktiviran. Kontaktiraj podršku za reaktivaciju.
               </p>
               <Link 
                 href="/dashboard"
@@ -350,222 +274,214 @@ export default function KreatoriPage() {
     }
   }
 
+  // Show subscription wall for non-subscribed business users
+  if (currentUser.type === 'business' && !hasActiveSubscription && !isCheckingSubscription) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-secondary/30">
+        <div className="max-w-md mx-auto px-6 text-center">
+          <div className="bg-white rounded-3xl p-10 border border-border shadow-sm">
+            <div className="text-5xl mb-6">🔒</div>
+            <h1 className="text-2xl font-light mb-3">Pretplata potrebna</h1>
+            <p className="text-muted mb-8">
+              Za pristup bazi kreatora potrebna je aktivna pretplata.
+            </p>
+            <Link 
+              href="/pricing"
+              className="block w-full py-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors"
+            >
+              Pogledaj planove
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Only show login prompt to guests (non-logged in users)
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-secondary/30">
+        <div className="max-w-md mx-auto px-6 text-center">
+          <div className="bg-white rounded-3xl p-10 border border-border shadow-sm">
+            <div className="text-5xl mb-6">🔐</div>
+            <h1 className="text-2xl font-light mb-3">Prijavi se</h1>
+            <p className="text-muted mb-8">
+              Moraš biti prijavljen da bi pregledao kreatore.
+            </p>
+            <Link 
+              href="/login"
+              className="block w-full py-4 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors mb-4"
+            >
+              Prijavi se
+            </Link>
+            <Link 
+              href="/register"
+              className="block w-full py-4 border border-border rounded-xl font-medium hover:bg-secondary transition-colors"
+            >
+              Registruj se
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
-      {/* Hero */}
-      <section className="bg-secondary py-10 sm:py-12 lg:py-16">
+      {/* Hero section */}
+      <div className="bg-secondary/30 py-12">
         <div className="max-w-7xl 2xl:max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-12">
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-light mb-2 sm:mb-4">Pretraži kreatore</h1>
-          <p className="text-muted text-sm sm:text-base max-w-xl">
-            Pronađi savršenog UGC kreatora za tvoj brend
-          </p>
+          <h1 className="text-4xl lg:text-5xl font-light mb-4">Pretraži kreatore</h1>
+          <p className="text-muted text-lg">Pronađi savršenog UGC kreatora za tvoj brend</p>
         </div>
-      </section>
+      </div>
 
       <div className="max-w-7xl 2xl:max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-12 py-8 lg:py-12">
         <div className="lg:flex lg:gap-12">
-          {/* Mobile filter toggle */}
-          <div className="lg:hidden mb-6">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white border border-border rounded-xl text-sm font-medium hover:bg-secondary transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-              {showFilters ? 'Sakrij filtere' : 'Prikaži filtere'}
-            </button>
-          </div>
-          
-          {/* Sidebar filters */}
-          <aside className={`
-            ${showFilters ? 'block' : 'hidden'} 
-            w-full lg:w-64 
-            flex-shrink-0 
-            mb-8 lg:mb-0
-            transition-all duration-300
-          `}>
-            <div className="w-full lg:w-64 lg:sticky lg:top-28 bg-white lg:bg-transparent p-4 lg:p-0 rounded-2xl lg:rounded-none border lg:border-0 border-border">
-              {/* Search */}
-              <div className="mb-8">
-                <label className="text-sm text-muted mb-2 block">Pretraga</label>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Ime, lokacija..."
-                  className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted"
-                />
-              </div>
+          {/* Mobile filters toggle */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className="lg:hidden w-full mb-6 py-3 border border-border rounded-xl flex items-center justify-center gap-2 hover:bg-secondary transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            {showFilters ? 'Sakrij filtere' : 'Prikaži filtere'}
+          </button>
 
-              {/* Category */}
-              <div className="mb-8">
-                <label className="text-sm text-muted mb-2 block">Kategorija</label>
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted bg-white"
-                >
-                  <option value="">Sve kategorije</option>
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
+          {/* Filters sidebar */}
+          {showFilters && (
+            <aside className="lg:w-64 flex-shrink-0 mb-8 lg:mb-0">
+              <div className="bg-white rounded-2xl border border-border p-6 space-y-6 sticky top-24">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-medium">Filteri</h2>
+                  <button
+                    onClick={clearFilters}
+                    className="text-sm text-muted hover:text-foreground transition-colors"
+                  >
+                    Očisti
+                  </button>
+                </div>
 
-              {/* Platform */}
-              <div className="mb-8">
-                <label className="text-sm text-muted mb-2 block">Platforma</label>
-                <select
-                  value={selectedPlatform}
-                  onChange={(e) => setSelectedPlatform(e.target.value)}
-                  className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted bg-white"
-                >
-                  <option value="">Sve platforme</option>
-                  {platforms.map((plat) => (
-                    <option key={plat} value={plat}>{plat}</option>
-                  ))}
-                </select>
-              </div>
+                {/* Search */}
+                <div>
+                  <label className="block text-sm text-muted mb-2">Pretraga</label>
+                  <input
+                    type="text"
+                    placeholder="Ime, lokacija..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-border rounded-xl focus:outline-none focus:border-primary text-sm"
+                  />
+                </div>
 
-              {/* Language */}
-              <div className="mb-8">
-                <label className="text-sm text-muted mb-2 block">Jezik</label>
-                <select
-                  value={selectedLanguage}
-                  onChange={(e) => setSelectedLanguage(e.target.value)}
-                  className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted bg-white"
-                >
-                  <option value="">Svi jezici</option>
-                  {languages.map((lang) => (
-                    <option key={lang} value={lang}>{lang}</option>
-                  ))}
-                </select>
-              </div>
+                {/* Category filter */}
+                <div>
+                  <label className="block text-sm text-muted mb-2">Kategorija</label>
+                  <select 
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-border rounded-xl focus:outline-none focus:border-primary text-sm appearance-none bg-white"
+                  >
+                    <option value="">Sve kategorije</option>
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Price Range */}
-              <div className="mb-8">
-                <label className="text-sm text-muted mb-2 block">Cenovni rang</label>
-                <select
-                  value={priceRange}
-                  onChange={(e) => setPriceRange(e.target.value)}
-                  className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted bg-white"
-                >
-                  <option value="">Svi cenovni rangovi</option>
-                  <option value="0-100">Do €100</option>
-                  <option value="100-200">€100 - €200</option>
-                  <option value="200-300">€200 - €300</option>
-                  <option value="300-">€300+</option>
-                </select>
-              </div>
+                {/* Platform filter */}
+                <div>
+                  <label className="block text-sm text-muted mb-2">Platforma</label>
+                  <select
+                    value={selectedPlatform}
+                    onChange={(e) => setSelectedPlatform(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-border rounded-xl focus:outline-none focus:border-primary text-sm appearance-none bg-white"
+                  >
+                    <option value="">Sve platforme</option>
+                    {platforms.map((platform) => (
+                      <option key={platform} value={platform}>{platform}</option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Rating Filter */}
-              <div className="mb-8">
-                <label className="text-sm text-muted mb-2 block">Minimalna ocena</label>
-                <div className="relative">
+                {/* Language filter */}
+                <div>
+                  <label className="block text-sm text-muted mb-2">Jezik</label>
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-border rounded-xl focus:outline-none focus:border-primary text-sm appearance-none bg-white"
+                  >
+                    <option value="">Svi jezici</option>
+                    {languages.map((lang) => (
+                      <option key={lang} value={lang}>{lang}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Price range */}
+                <div>
+                  <label className="block text-sm text-muted mb-2">Cena (€)</label>
+                  <select
+                    value={priceRange}
+                    onChange={(e) => setPriceRange(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-border rounded-xl focus:outline-none focus:border-primary text-sm appearance-none bg-white"
+                  >
+                    <option value="">Bilo koja cena</option>
+                    <option value="0-50">Do €50</option>
+                    <option value="50-100">€50 - €100</option>
+                    <option value="100-200">€100 - €200</option>
+                    <option value="200-500">€200 - €500</option>
+                    <option value="500-">€500+</option>
+                  </select>
+                </div>
+
+                {/* Min rating */}
+                <div>
+                  <label className="block text-sm text-muted mb-2">Minimalna ocena</label>
                   <select
                     value={minRating}
                     onChange={(e) => setMinRating(e.target.value)}
-                    className="w-full px-4 py-3 border border-border rounded-xl focus:outline-none focus:border-muted bg-white appearance-none"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl focus:outline-none focus:border-primary text-sm appearance-none bg-white"
                   >
-                    <option value="">Sve ocene</option>
-                    <option value="5">5.0 ⭐</option>
+                    <option value="">Bilo koja ocena</option>
                     <option value="4.5">4.5+ ⭐</option>
-                    <option value="4">4.0+ ⭐</option>
+                    <option value="4">4+ ⭐</option>
                     <option value="3.5">3.5+ ⭐</option>
-                    <option value="3">3.0+ ⭐</option>
+                    <option value="3">3+ ⭐</option>
                   </select>
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                    <svg className="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
                 </div>
-                {/* Rating preview with stars */}
-                {minRating && (
-                  <div className="mt-2 flex items-center gap-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <svg
-                        key={star}
-                        viewBox="0 0 24 24"
-                        fill={star <= parseFloat(minRating) ? '#f59e0b' : 'none'}
-                        stroke={star <= parseFloat(minRating) ? '#f59e0b' : '#e5e5e5'}
-                        strokeWidth={2}
-                        className="w-4 h-4"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"
-                        />
-                      </svg>
-                    ))}
-                    <span className="text-sm text-muted ml-1">{minRating}+</span>
-                  </div>
-                )}
               </div>
-
-              {/* Clear filters */}
-              <button
-                onClick={clearFilters}
-                className="w-full py-3 text-sm text-muted hover:text-foreground border border-border rounded-xl hover:bg-secondary transition-colors"
-              >
-                Očisti filtere
-              </button>
-              
-              {/* Hide filters button - mobile only */}
-              <button
-                onClick={() => setShowFilters(false)}
-                className="lg:hidden w-full mt-4 py-3 text-sm font-medium bg-primary text-white rounded-xl hover:bg-primary/90 transition-colors"
-              >
-                Primeni filtere
-              </button>
-            </div>
-          </aside>
+            </aside>
+          )}
 
           {/* Main content */}
           <main className="flex-1 min-w-0">
-            {/* Results count & sorting */}
-            <div className="mb-6 lg:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                {/* Filter toggle button - desktop only */}
-                <button
-                  onClick={() => setShowFilters(!showFilters)}
-                  className={`hidden lg:flex p-2.5 rounded-xl border transition-all ${
-                    showFilters 
-                      ? 'bg-primary text-white border-primary' 
-                      : 'bg-white text-muted border-border hover:bg-secondary hover:text-foreground'
-                  }`}
-                  title={showFilters ? 'Sakrij filtere' : 'Prikaži filtere'}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                  </svg>
-                </button>
-                <p className="text-muted text-sm sm:text-base">
-                  {isLoadingCreators ? (
-                    <span className="text-muted">Učitavanje...</span>
-                  ) : (
-                    <>Prikazano <span className="font-medium text-foreground">{paginatedCreators.length}</span> od <span className="font-medium text-foreground">{filteredCreators.length}</span> kreatora</>
-                  )}
-                </p>
-              </div>
-              
+            {/* Results header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+              <p className="text-muted text-sm">
+                {isLoadingCreators ? (
+                  'Učitavanje...'
+                ) : (
+                  <>Prikazano <span className="font-medium text-foreground">{paginatedCreators.length}</span> od <span className="font-medium text-foreground">{filteredCreators.length}</span> kreatora</>
+                )}
+              </p>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="w-full sm:w-auto px-4 py-2.5 border border-border rounded-xl focus:outline-none focus:border-muted bg-white text-sm"
+                className="px-4 py-2 border border-border rounded-xl focus:outline-none focus:border-primary text-sm appearance-none bg-white w-full sm:w-auto"
               >
                 <option value="">Sortiraj po</option>
-                <option value="rating-desc">Najviša ocena</option>
-                <option value="rating-asc">Najniža ocena</option>
-                <option value="reviews">Najviše recenzija</option>
-                <option value="price-asc">Cena: niska → visoka</option>
-                <option value="price-desc">Cena: visoka → niska</option>
+                <option value="rating-desc">Ocena (najviša)</option>
+                <option value="rating-asc">Ocena (najniža)</option>
+                <option value="reviews">Broj recenzija</option>
+                <option value="price-asc">Cena (najniža)</option>
+                <option value="price-desc">Cena (najviša)</option>
               </select>
             </div>
 
-            {/* Grid */}
+            {/* Results */}
             {isLoadingCreators ? (
               <div className="text-center py-20">
                 <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
@@ -575,8 +491,8 @@ export default function KreatoriPage() {
             ) : filteredCreators.length > 0 ? (
               <>
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
-                  {paginatedCreators.map((creator) => (
-                    <CreatorCard key={creator.id} creator={creator} />
+                  {paginatedCreators.map((creator, index) => (
+                    <CreatorCard key={creator.id} creator={creator} priority={index < 6} />
                   ))}
                 </div>
                 
@@ -606,8 +522,8 @@ export default function KreatoriPage() {
                           })
                           .map((page, index, arr) => (
                             <div key={page} className="flex items-center">
-                              {/* Add ellipsis if there's a gap */}
-                              {index > 0 && arr[index - 1] !== page - 1 && (
+                              {/* Show ellipsis if there's a gap */}
+                              {index > 0 && page - arr[index - 1] > 1 && (
                                 <span className="px-2 text-muted">...</span>
                               )}
                               <button
@@ -636,7 +552,8 @@ export default function KreatoriPage() {
                       </button>
                     </div>
                     
-                    <p className="text-sm text-muted">
+                    {/* Page info for mobile */}
+                    <p className="text-sm text-muted sm:hidden">
                       Stranica {currentPage} od {totalPages}
                     </p>
                   </div>
@@ -644,12 +561,12 @@ export default function KreatoriPage() {
               </>
             ) : (
               <div className="text-center py-20">
-                <div className="text-4xl mb-4">🔍</div>
+                <div className="text-6xl mb-6">🔍</div>
                 <h3 className="text-xl font-medium mb-2">Nema rezultata</h3>
                 <p className="text-muted mb-6">Pokušaj sa drugim filterima</p>
                 <button
                   onClick={clearFilters}
-                  className="px-6 py-3 bg-primary text-white rounded-full text-sm hover:bg-primary/90 transition-colors"
+                  className="px-6 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary/90 transition-colors"
                 >
                   Očisti filtere
                 </button>

@@ -6,18 +6,15 @@ import {
   DemoUser, 
   demoUsers, 
   Creator, 
-  mockCreators, 
-  pendingCreators, 
   CreatorStatus,
   Review,
   ReviewStatus,
-  mockReviews,
 } from '@/lib/mockData';
 import type { Rating, CreateReviewInput } from '@/types/review';
 import { createClient } from '@/lib/supabase/client';
 
-// Combine all creators into one source of truth
-const allBaseCreators: Creator[] = [...mockCreators, ...pendingCreators];
+// No more mock creators - all data comes from Supabase
+const allBaseCreators: Creator[] = [];
 
 // Type for creator modifications stored in localStorage
 interface CreatorModification {
@@ -166,7 +163,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [creatorModifications, setCreatorModifications] = useState<Record<string, CreatorModification>>({});
   const [newCreators, setNewCreators] = useState<Creator[]>([]);
-  const [reviews, setReviews] = useState<Review[]>(mockReviews);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
   const [userSettings, setUserSettings] = useState<UserSettings>(defaultSettings);

@@ -1,48 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 
-// GET /api/creators - Dohvati kreatore sa paginacijom
+// GET /api/creators - Dohvati kreatore
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const includeAll = searchParams.get('includeAll') === 'true'; // Za admin
+    const includeAll = searchParams.get('includeAll') === 'true';
     const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '12'); // 12 kreatora po stranici
+    const limit = parseInt(searchParams.get('limit') || '12');
     const offset = (page - 1) * limit;
 
     const supabase = createAdminClient();
 
-    // Prvo dohvati ukupan broj za paginaciju
-    let countQuery = supabase
-      .from('creators')
-      .select('*', { count: 'exact', head: true });
-    
-    if (!includeAll) {
-      countQuery = countQuery.eq('status', 'approved');
-    }
-    
-    const { count: totalCount } = await countQuery;
-
-    // Dohvati kreatore sa paginacijom
+    // Jednostavan query - bez kompleksnih filtera
     let query = supabase
       .from('creators')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false });
 
-    // Ako nije admin, prikaži samo odobrene
+    // Filter po statusu - ako nije admin, samo approved
     if (!includeAll) {
       query = query.eq('status', 'approved');
     }
 
-    const { data: creators, error } = await query;
+    // Paginacija
+    query = query.range(offset, offset + limit - 1);
+
+    const { data: creators, error, count: totalCount } = await query;
 
     if (error) {
       console.error('Error fetching creators:', error);
       return NextResponse.json({ error: 'Failed to fetch creators' }, { status: 500 });
     }
 
-    // Transformiši podatke u format koji frontend očekuje
+    // Transformiši podatke
     const formattedCreators = creators?.map(creator => ({
       id: creator.id,
       name: creator.name,
@@ -57,7 +48,6 @@ export async function GET(request: NextRequest) {
       totalReviews: creator.total_reviews || 0,
       profileViews: creator.profile_views || 0,
       status: creator.status,
-      // Dodatna polja
       email: creator.email,
       phone: creator.phone,
       instagram: creator.instagram,
@@ -71,7 +61,7 @@ export async function GET(request: NextRequest) {
 
     const totalPages = Math.ceil((totalCount || 0) / limit);
 
-    return NextResponse.json({ 
+    const response = NextResponse.json({ 
       creators: formattedCreators,
       pagination: {
         page,
@@ -81,6 +71,11 @@ export async function GET(request: NextRequest) {
         hasMore: page < totalPages,
       }
     });
+    
+    // Cache for 30 seconds to reduce Supabase calls
+    response.headers.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=60');
+    
+    return response;
 
   } catch (error: any) {
     console.error('Creators fetch error:', error);

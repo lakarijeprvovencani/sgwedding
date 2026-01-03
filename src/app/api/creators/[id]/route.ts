@@ -38,6 +38,7 @@ export async function GET(
       profileViews: creator.profile_views || 0,
       status: creator.status,
       approved: creator.status === 'approved',
+      rejectionReason: creator.rejection_reason || null,
       // Kontakt info
       email: creator.email,
       phone: creator.phone,
@@ -52,7 +53,11 @@ export async function GET(
       userId: creator.user_id,
     };
 
-    return NextResponse.json({ creator: formattedCreator });
+    // Cache za 60 sekundi (profil se ne menja često)
+    const response = NextResponse.json({ creator: formattedCreator });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120');
+    
+    return response;
 
   } catch (error: any) {
     console.error('Creator fetch error:', error);

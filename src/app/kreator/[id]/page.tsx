@@ -1047,19 +1047,23 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
 
               {/* Business's existing review notice */}
               {currentUser.type === 'business' && businessHasReviewed && (
-                <div className="mb-6 bg-secondary rounded-xl p-4 flex items-center gap-3">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-muted">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
-                  </svg>
-                  <p className="text-sm text-muted">
-                    Već ste ostavili recenziju za ovog kreatora. 
-                    {(() => {
-                      const review = businessReview;
-                      if (review?.status === 'pending') {
-                        return ' Vaša recenzija čeka odobrenje.';
-                      }
-                      return '';
-                    })()}
+                <div className={`mb-6 rounded-xl p-4 flex items-center gap-3 ${
+                  businessReview?.status === 'pending' 
+                    ? 'bg-amber-50 border border-amber-200' 
+                    : 'bg-secondary'
+                }`}>
+                  {businessReview?.status === 'pending' ? (
+                    <span className="text-xl">⏳</span>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-600">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                  <p className={`text-sm ${businessReview?.status === 'pending' ? 'text-amber-800' : 'text-muted'}`}>
+                    {businessReview?.status === 'pending' 
+                      ? 'Vaša recenzija je poslata i čeka odobrenje administratora.'
+                      : 'Već ste ostavili recenziju za ovog kreatora.'
+                    }
                   </p>
                 </div>
               )}
@@ -1067,18 +1071,30 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ id: s
               {/* Reviews list */}
               {(() => {
                 const reviews = creatorReviews.filter(r => r.status === 'approved');
+                const hasPendingReview = businessReview && businessReview.status === 'pending';
+                
                 if (reviews.length === 0 && !showReviewForm) {
                   return (
                     <div className="text-center py-12 bg-secondary/30 rounded-2xl">
-                      <div className="text-4xl mb-4">📝</div>
-                      <p className="text-muted">Još uvek nema recenzija za ovog kreatora.</p>
-                      {currentUser.type === 'business' && !businessHasReviewed && (
-                        <button
-                          onClick={() => setShowReviewForm(true)}
-                          className="mt-4 text-sm text-primary hover:underline"
-                        >
-                          Budite prvi koji će ostaviti recenziju
-                        </button>
+                      {hasPendingReview ? (
+                        <>
+                          <div className="text-4xl mb-4">⏳</div>
+                          <p className="font-medium mb-2">Vaša recenzija je poslata!</p>
+                          <p className="text-muted text-sm">Recenzija čeka odobrenje administratora i biće vidljiva nakon što bude odobrena.</p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-4xl mb-4">📝</div>
+                          <p className="text-muted">Još uvek nema recenzija za ovog kreatora.</p>
+                          {currentUser.type === 'business' && !businessHasReviewed && (
+                            <button
+                              onClick={() => setShowReviewForm(true)}
+                              className="mt-4 text-sm text-primary hover:underline"
+                            >
+                              Budite prvi koji će ostaviti recenziju
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   );

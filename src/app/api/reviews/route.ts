@@ -11,29 +11,10 @@ export async function GET(request: NextRequest) {
 
     const supabase = createAdminClient();
 
+    // Prvo dohvati recenzije
     let query = supabase
       .from('reviews')
-      .select(`
-        id,
-        rating,
-        comment,
-        status,
-        created_at,
-        updated_at,
-        business_id,
-        creator_id,
-        reply,
-        reply_date,
-        businesses (
-          id,
-          company_name
-        ),
-        creators (
-          id,
-          name,
-          photo
-        )
-      `)
+      .select('*')
       .order('created_at', { ascending: false });
 
     // Filtriraj po businessId
@@ -53,35 +34,61 @@ export async function GET(request: NextRequest) {
 
     const { data: reviews, error } = await query;
 
+    console.log('Reviews fetched:', { count: reviews?.length, error: error?.message });
+
     if (error) {
       console.error('Error fetching reviews:', error);
       return NextResponse.json({ error: 'Failed to fetch reviews' }, { status: 500 });
     }
 
-    // Transformiši podatke u format koji frontend očekuje
-    const formattedReviews = reviews?.map(review => ({
-      id: review.id,
-      rating: review.rating,
-      comment: review.comment,
-      status: review.status,
-      createdAt: review.created_at,
-      date: review.created_at,
-      updatedAt: review.updated_at,
-      businessId: review.business_id,
-      creatorId: review.creator_id,
-      businessName: review.businesses?.company_name || 'Anonimni biznis',
-      business: {
-        id: review.businesses?.id,
-        name: review.businesses?.company_name,
-      },
-      creator: {
-        id: review.creators?.id,
-        name: review.creators?.name,
-        photo: review.creators?.photo,
-      },
-      reply: review.reply || null,
-      replyDate: review.reply_date || null,
-    })) || [];
+    // Dohvati business i creator podatke odvojeno
+    const formattedReviews = await Promise.all((reviews || []).map(async (review) => {
+      // Dohvati business
+      let businessName = 'Anonimni biznis';
+      let businessData = null;
+      if (review.business_id) {
+        const { data: business } = await supabase
+          .from('businesses')
+          .select('id, company_name')
+          .eq('id', review.business_id)
+          .single();
+        if (business) {
+          businessName = business.company_name;
+          businessData = { id: business.id, name: business.company_name };
+        }
+      }
+
+      // Dohvati creator
+      let creatorData = null;
+      if (review.creator_id) {
+        const { data: creator } = await supabase
+          .from('creators')
+          .select('id, name, photo')
+          .eq('id', review.creator_id)
+          .single();
+        if (creator) {
+          creatorData = { id: creator.id, name: creator.name, photo: creator.photo };
+        }
+      }
+
+      return {
+        id: review.id,
+        rating: review.rating,
+        comment: review.comment,
+        status: review.status,
+        rejectionReason: review.rejection_reason || null,
+        createdAt: review.created_at,
+        date: review.created_at,
+        updatedAt: review.updated_at,
+        businessId: review.business_id,
+        creatorId: review.creator_id,
+        businessName,
+        business: businessData,
+        creator: creatorData,
+        reply: review.reply || null,
+        replyDate: review.reply_date || null,
+      };
+    }));
 
     return NextResponse.json({ reviews: formattedReviews });
 
@@ -96,7 +103,10 @@ export async function POST(request: NextRequest) {
   try {
     const { businessId, creatorId, rating, comment } = await request.json();
 
+    console.log('Creating review:', { businessId, creatorId, rating, comment });
+
     if (!businessId || !creatorId || !rating) {
+      console.log('Missing required fields:', { businessId, creatorId, rating });
       return NextResponse.json({ error: 'Business ID, Creator ID, and rating are required' }, { status: 400 });
     }
 
@@ -134,7 +144,7 @@ export async function POST(request: NextRequest) {
 // PUT - Ažuriraj recenziju
 export async function PUT(request: NextRequest) {
   try {
-    const { reviewId, rating, comment, status } = await request.json();
+    const { reviewId, rating, comment, status, rejectionReason } = await request.json();
 
     if (!reviewId) {
       return NextResponse.json({ error: 'Review ID is required' }, { status: 400 });
@@ -146,6 +156,11 @@ export async function PUT(request: NextRequest) {
     if (rating !== undefined) updateData.rating = rating;
     if (comment !== undefined) updateData.comment = comment;
     if (status !== undefined) updateData.status = status;
+    if (status === 'rejected') {
+      updateData.rejection_reason = rejectionReason || null;
+    } else if (status === 'approved') {
+      updateData.rejection_reason = null; // Očisti razlog ako se odobri
+    }
 
     const { data: review, error } = await supabase
       .from('reviews')
